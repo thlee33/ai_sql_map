@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>음성/텍스트 GIS 대시보드</title>
+    
+    <script src='https://unpkg.com/maplibre-gl@4.1.3/dist/maplibre-gl.js'></script>
+    <link href='https://unpkg.com/maplibre-gl@4.1.3/dist/maplibre-gl.css' rel='stylesheet' />
+    
+    <style>
+        body { margin: 0; padding: 0; font-family: sans-serif; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 10;
+            width: 300px;
+            max-height: 90vh; /* [NEW] 높이 제한 */
+            overflow-y: auto; /* [NEW] 컨트롤 스크롤 */
+        }
+        
+        #status {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #555;
+            min-height: 40px;
+        }
+
+        /* [NEW] 텍스트 답변 UI */
+        #answerBox {
+            margin-top: 15px;
+            padding: 10px;
+            background: #f4f4f4;
+            border-radius: 5px;
+            display: none; /* 기본 숨김 */
+        }
+        
+        #sqlResult {
+            /* (기존 스타일 동일) */
+            position: absolute; bottom: 20px; left: 20px;
+            background: rgba(0,0,0,0.7); color: white; padding: 10px;
+            border-radius: 5px; z-index: 10; font-family: monospace;
+            max-width: 500px; max-height: 200px; overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+
+<div id='map'></div>
+
+<div id="controls">
+    <h3>음성 명령</h3>
+    <button id="btnVoice" disabled>🎙️ (지도 로딩 중...)</button>
+    <div id="status">지도 로딩 중...</div>
+
+    <hr style="margin: 20px 0;">
+    <h3>텍스트 명령</h3>
+    <input type="text" id="textInput" placeholder="지도 로딩 중..." disabled>
+    <button id="btnSubmitText" disabled>분석 실행</button>
+
+    <div id="answerBox">
+        <h4>AI 답변:</h4>
+        <p id="answerText"></p>
+    </div>
+    </div>
+
+<pre id="sqlResult"></pre>
+
+
+<script>
+    // --- 1. UI 요소 미리 가져오기 ---
+    const btnVoice = document.getElementById('btnVoice');
+    const statusEl = document.getElementById('status');
+    const sqlResultEl = document.getElementById('sqlResult');
+    const textInput = document.getElementById('textInput');
+    const btnSubmitText = document.getElementById('btnSubmitText');
+    
+    // [NEW] 텍스트 답변 UI
+    const answerBox = document.getElementById('answerBox');
+    const answerText = document.getElementById('answerText');
+    
+    const speechRecognitionAvailable = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    // --- 2. MapLibre 지도 초기화 ---
+    const map = new maplibregl.Map({
+        container: 'map',
+        style: 'https://api.maptiler.com/maps/streets-v2/style.json?key=ov5U6wIwpS3kTZHbW0wk',
+        center: [126.9380, 37.6000], 
+        zoom: 15
+    });
+
+    // --- 3. 지도 로딩 완료 이벤트 ---
+    map.on('load', () => {
+        map.addSource('analysis-results', {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: [] }
+        });
+        
+        // --- [수정] 데이터 기반 스타일링 레이어 ---
+        map.addLayer({
+            id: 'results-points',
+            type: 'circle',
+            source: 'analysis-results',
+            paint: {
+                // [NEW] data_type 속성 값에 따라 색상 변경
+                'circle-color': [
+                    'match',
+                    ['get', 'data_type'], // GeoJSON의 properties.data_type 값을 가져옴
+                    'building', '#FF4136',  // 'building'이면 빨간색
+                    'station', '#0074D9',   // 'station'이면 파란색
+                    '#AAAAAA'               // 그 외에는 회색
+                ],
+                'circle-radius': 8,
+                'circle-stroke-width': 2,
+                'circle-stroke-color': '#FFFFFF'
+            }
+        });
+
+        // UI 활성화
+        statusEl.textContent = "지도 로딩 완료. 명령 대기 중...";
+        if (speechRecognitionAvailable) {
+            btnVoice.disabled = false;
+            btnVoice.textContent = "🎙️ (눌러서 말하기)";
+        } else {
+            statusEl.textContent = "오류: 이 브라우저는 음성 인식을 지원하지 않습니다.";
+            btnVoice.textContent = "🎙️ (음성인식 불가)";
+        }
+        textInput.disabled = false;
+        textInput.placeholder = "예: 녹번역 500미터 이내 건물";
+        btnSubmitText.disabled = false;
+    });
+
+    // --- 4. 음성 인식 설정 (기존과 동일) ---
+    // (생략 - 기존 코드와 동일)
+
+    // --- 5. 텍스트 입력 이벤트 리스너 (기존과 동일) ---
+    btnSubmitText.addEventListener('click', submitText);
+    textInput.addEventListener('keypress', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            submitText();
+        }
+    });
+
+    function submitText() {
+        const text = textInput.value;
+        if (text.trim() === "") { return; }
+        statusEl.textContent = `입력된 텍스트: "${text}"`;
+        sqlResultEl.textContent = "";
+        answerBox.style.display = "none"; // 답변 상자 초기화
+        
+        sendToBackend(text);
+    }
+
+    // --- 6. [수정] 백엔드 API 호출 (라우팅) ---
+    async function sendToBackend(text) {
+        statusEl.textContent = "백엔드에서 분석 중...";
+        const backendUrl = 'http://127.0.0.1:8000/analyze';
+
+        try {
+            const response = await fetch(backendUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ text: text })
+            });
+
+            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
+
+            const result = await response.json();
+
+            // --- [NEW] 백엔드 응답 라우팅 ---
+            
+            // 1. 텍스트 답변이 온 경우 (GENERAL_ANSWER)
+            if (result.answer_text) {
+                statusEl.textContent = "AI 답변을 수신했습니다.";
+                answerText.textContent = result.answer_text;
+                answerBox.style.display = "block"; // 답변 상자 보이기
+                updateMap({ type: 'FeatureCollection', features: [] }); // 지도 지우기
+                sqlResultEl.textContent = "[일반 텍스트 답변]";
+            
+            // 2. GeoJSON 데이터가 온 경우 (SPATIAL_QUERY)
+            } else if (result.type === "FeatureCollection") {
+                statusEl.textContent = `분석 완료! ${result.features.length}개 결과 표시.`;
+                sqlResultEl.textContent = `[백엔드 정보]\nLLM이 생성한 SQL은 백엔드 터미널을 확인하세요.`;
+                updateMap(result); // 지도 업데이트
+                answerBox.style.display = "none"; // 답변 상자 숨기기
+
+            // 3. 에러가 온 경우
+            } else if (result.error) {
+                statusEl.textContent = "분석 오류 발생!";
+                sqlResultEl.textContent = `[백엔드 에러]\n${result.error}\n\n[생성된 쿼리]\n${result.query || 'N/A'}`;
+                updateMap({ type: 'FeatureCollection', features: [] });
+            
+            // 4. 알 수 없는 형식
+            } else {
+                throw new Error("알 수 없는 백엔드 응답 형식입니다.");
+            }
+            // --- 라우팅 끝 ---
+
+        } catch (error) {
+            console.error("Fetch Error:", error);
+            statusEl.textContent = "서버 통신 중 오류 발생!";
+            sqlResultEl.textContent = `(Error: ${error.message})\n백엔드 서버 로그를 확인하세요.`;
+        }
+    }
+
+    // --- 7. 지도 업데이트 함수 (기존과 동일) ---
+    function updateMap(geojson) {
+        try {
+            map.getSource('analysis-results').setData(geojson);
+            
+            if (geojson.features.length > 0) {
+                // [NEW] FitBounds로 모든 피처가 보이도록 줌
+                const bounds = new maplibregl.LngLatBounds();
+                geojson.features.forEach(feature => {
+                    bounds.extend(feature.geometry.coordinates);
+                });
+                map.fitBounds(bounds, { padding: 100 }); // 100px 여백
+            }
+        } catch (error) {
+            console.error("Map update error:", error);
+            statusEl.textContent = "지도 업데이트 중 오류 발생.";
+        }
+    }
+</script>
+
+<script>
+    if (speechRecognitionAvailable) {
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'ko-KR';
+        recognition.continuous = false;
+        recognition.interimResults = false;
+        btnVoice.addEventListener('click', () => {
+            statusEl.textContent = "듣고 있습니다... 🎤";
+            btnVoice.style.backgroundColor = '#dc3545';
+            sqlResultEl.textContent = "";
+            answerBox.style.display = "none"; // 답변 상자 초기화
+            recognition.start();
+        });
+        recognition.onresult = (event) => {
+            const text = event.results[0][0].transcript;
+            statusEl.textContent = `인식된 텍스트: "${text}"`;
+            sendToBackend(text);
+        };
+        recognition.onend = () => {
+            btnVoice.style.backgroundColor = '#007bff';
+        };
+        recognition.onerror = (event) => {
+            statusEl.textContent = `음성 인식 오류: ${event.error}`;
+        };
+    }
+</script>
+
+</body>
+</html>

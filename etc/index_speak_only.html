@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8" />
+    <title>음성인식 GIS 대시보드</title>
+    
+    <script src='https://unpkg.com/maplibre-gl@4.1.3/dist/maplibre-gl.js'></script>
+    <link href='https://unpkg.com/maplibre-gl@4.1.3/dist/maplibre-gl.css' rel='stylesheet' />
+    
+    <style>
+        body { margin: 0; padding: 0; font-family: sans-serif; }
+        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        
+        /* 컨트롤 패널 */
+        #controls {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 10;
+            width: 300px;
+        }
+        
+        #btnVoice {
+            width: 100%;
+            padding: 15px;
+            font-size: 16px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        
+        #btnVoice:hover { background-color: #0056b3; }
+        
+        #status {
+            margin-top: 15px;
+            font-size: 14px;
+            color: #555;
+            min-height: 40px;
+        }
+
+        /* LLM이 생성한 쿼리 표시 (디버깅용) */
+        #sqlResult {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            background: rgba(0,0,0,0.7);
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+            z-index: 10;
+            font-family: monospace;
+            max-width: 500px;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body>
+
+<div id='map'></div>
+
+<div id="controls">
+    <h3>음성 명령</h3>
+    <button id="btnVoice">🎙️ (눌러서 말하기)</button>
+    <div id="status">명령 대기 중...</div>
+</div>
+
+<pre id="sqlResult"></pre>
+
+
+<script>
+    // --- 1. MapLibre 지도 초기화 ---
+    const map = new maplibregl.Map({
+        container: 'map',
+        // 오픈소스 OSM 벡터 타일 사용
+        style: 'https://api.maptiler.com/maps/streets-v2/style.json?key=get_your_own_OpIi9ZULNADoOIi7_nkT', 
+        center: [126.9380, 37.6000], // 서울 녹번동 중심
+        zoom: 15
+    });
+
+    map.on('load', () => {
+        // 분석 결과를 담을 빈 GeoJSON 소스 추가
+        map.addSource('analysis-results', {
+            type: 'geojson',
+            data: {
+                type: 'FeatureCollection',
+                features: []
+            }
+        });
+        
+        // 분석 결과 레이어 (점)
+        map.addLayer({
+            id: 'results-points',
+            type: 'circle',
+            source: 'analysis-results',
+            paint: {
+                'circle-radius': 8,
+                'circle-color': '#FF0000',
+                'circle-stroke-width': 2,
+                'circle-stroke-color': '#FFFFFF'
+            }
+        });
+    });
+
+    // --- 2. Web Speech API (음성 인식) 설정 ---
+    const btnVoice = document.getElementById('btnVoice');
+    const statusEl = document.getElementById('status');
+    const sqlResultEl = document.getElementById('sqlResult');
+
+    // 브라우저 호환성 체크
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SpeechRecognition) {
+        statusEl.textContent = "오류: 이 브라우저는 음성 인식을 지원하지 않습니다. (크롬 브라우저를 사용하세요)";
+        btnVoice.disabled = true;
+    } else {
+        const recognition = new SpeechRecognition();
+        recognition.lang = 'ko-KR'; // 한국어 설정
+        recognition.continuous = false; // 한 문장만 인식
+        recognition.interimResults = false; // 최종 결과만
+
+        // 음성 인식 시작
+        btnVoice.addEventListener('click', () => {
+            statusEl.textContent = "듣고 있습니다... 🎤";
+            btnVoice.style.backgroundColor = '#dc3545'; // 녹음 중 색상
+            sqlResultEl.textContent = "";
+            recognition.start();
+        });
+
+        // 음성 인식 결과 처리
+        recognition.onresult = (event) => {
+            const text = event.results[0][0].transcript;
+            statusEl.textContent = `인식된 텍스트: "${text}"`;
+            
+            // 인식된 텍스트를 백엔드로 전송
+            sendToBackend(text);
+        };
+
+        // 음성 인식 종료 (정상/에러)
+        recognition.onend = () => {
+            btnVoice.style.backgroundColor = '#007bff'; // 원래 색상
+        };
+
+        recognition.onerror = (event) => {
+            statusEl.textContent = `음성 인식 오류: ${event.error}`;
+        };
+    }
+
+    // --- 3. 백엔드 API 호출 (핵심) ---
+    async function sendToBackend(text) {
+        statusEl.textContent = "백엔드에서 분석 중... (최대 10초 소요)";
+        
+        // 백엔드 주소 (main.py가 실행 중인 곳)
+        const backendUrl = 'http://127.0.0.1:8000/analyze';
+
+        try {
+            const response = await fetch(backendUrl, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ text: text })
+            });
+
+            const geojsonResult = await response.json();
+
+            // 백엔드에서 에러가 반환된 경우
+            if (geojsonResult.error) {
+                statusEl.textContent = "분석 오류 발생!";
+                sqlResultEl.textContent = `[에러]\n${geojsonResult.error}\n\n[생성된 쿼리]\n${geojsonResult.query || 'N/A'}`;
+                updateMap({ type: 'FeatureCollection', features: [] }); // 지도 클리어
+            } 
+            // 정상 결과
+            else {
+                statusEl.textContent = `분석 완료! ${geojsonResult.features.length}개 결과 표시.`;
+                sqlResultEl.textContent = `[백엔드 정보]\nLLM이 생성한 SQL은 백엔드 터미널을 확인하세요.\n\n[결과 속성 (첫 번째)]\n${JSON.stringify(geojsonResult.features[0]?.properties || '결과 없음', null, 2)}`;
+                
+                // 지도 업데이트
+                updateMap(geojsonResult);
+            }
+
+        } catch (error) {
+            statusEl.textContent = "백엔드 서버 연결 실패!";
+            sqlResultEl.textContent = `백엔드(FastAPI) 서버가 실행 중인지 확인하세요.\n(Error: ${error.message})`;
+        }
+    }
+
+    // --- 4. 지도 업데이트 함수 ---
+    function updateMap(geojson) {
+        // 기존 소스 데이터 업데이트
+        map.getSource('analysis-results').setData(geojson);
+        
+        // 데이터가 있으면 해당 위치로 지도 이동
+        if (geojson.features.length > 0) {
+            // (간단하게 첫 번째 피처의 중심으로 이동)
+            const coordinates = geojson.features[0].geometry.coordinates;
+            map.flyTo({
+                center: coordinates,
+                zoom: 16
+            });
+        }
+    }
+</script>
+
+</body>
+</html>

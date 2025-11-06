@@ -1,0 +1,6 @@
+# requirements.txt
+fastapi
+uvicorn
+psycopg[binary]
+python-dotenv
+google-generativeai
