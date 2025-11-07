@@ -1,501 +1,213 @@
-<!DOCTYPE html>
-<html>
-<head>
-    <meta charset="utf-8" />
-    <title>음성/텍스트 GIS 대시보드</title>
+# main.py (Render.com 배포용 - 3D/Pitch 기능 추가)
+import os
+import psycopg
+import google.generativeai as genai
+import json 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from dotenv import load_dotenv
+
+# .env 파일 로드 (로컬 테스트용. Render.com에서는 이 파일 안 씀)
+load_dotenv()
+
+# --- 1. API 키 설정 (환경 변수에서 읽기) ---
+try:
+    genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
+except KeyError:
+    print("❌ 에러: GOOGLE_API_KEY 환경 변수가 없습니다.")
+except Exception as e:
+    print(f"❌ Gemini 설정 에러: {e}")
+
+# --- 2. DB 접속 정보 (환경 변수에서 읽기) ---
+DB_HOST = os.environ.get("DB_HOST")
+DB_PORT = os.environ.get("DB_PORT", "5432") # 기본값 5432
+DB_NAME = os.environ.get("DB_NAME")
+DB_USER = os.environ.get("DB_USER")
+DB_PASS = os.environ.get("DB_PASS")
+
+# DB 스키마 정보 ('geography' 타입 힌트 포함)
+DATABASE_SCHEMA = """
+[데이터베이스 스키마]
+1.  buildings (건물 테이블)
+    - id (INT, Primary Key)
+    - address (TEXT): 주소 (예: '녹번동 11-1')
+    - build_year (INT): 건축 연도 (예: 1990)
+    - geom (GEOMETRY(Point, 4326)): 위치 (EPSG:4326 - 단위: '도')
+
+2.  subway_stations (지하철역 테이블)
+    - id (INT, Primary Key)
+    - station_name (TEXT): 역 이름 (예: '녹번역')
+    - geom (GEOMETRY(Point, 4326)): 위치 (EPSG:4326 - 단위: '도')
+
+[PostGIS 주요 함수]
+* [중요!] 모든 거리/미터(meters) 단위 계산은 `geography` 타입으로 변환해야 합니다.
+* ST_DWithin (거리 내 검색): `ST_DWithin(geom::geography, (SELECT geom FROM ...)::geography, 500)`
+* ST_Buffer (반경 영역): `ST_Buffer(geom::geography, 50)::geometry` (결과는 `::geometry`로 다시 변환)
+"""
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"], 
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+class VoiceQuery(BaseModel):
+    text: str
+
+def execute_postgis_query(sql_query: str):
+    if not all([DB_HOST, DB_NAME, DB_USER, DB_PASS]):
+        print("❌ 쿼리 실행 에러: DB 환경 변수가 설정되지 않았습니다.")
+        return {"error": "서버의 데이터베이스 연결 정보가 설정되지 않았습니다.", "query": sql_query}
+        
+    conn_info = f"host={DB_HOST} port={DB_PORT} dbname={DB_NAME} user={DB_USER} password={DB_PASS}"
+    try:
+        with psycopg.connect(conn_info) as conn:
+            with conn.cursor() as cur:
+                geojson_query = f"""
+                WITH analysis_result AS (
+                    {sql_query} 
+                )
+                SELECT json_build_object(
+                    'type', 'FeatureCollection',
+                    'features', json_agg(
+                        json_build_object(
+                            'type', 'Feature',
+                            'geometry', ST_AsGeoJSON(geom)::json,
+                            'properties', row_to_json(analysis_result)::jsonb - 'geom'
+                        )
+                    )
+                )
+                FROM analysis_result
+                WHERE geom IS NOT NULL;
+                """
+                cur.execute(geojson_query)
+                result = cur.fetchone()
+                if result and result[0]:
+                    return result[0]
+                else:
+                    return {"type": "FeatureCollection", "features": []}
+    except Exception as e:
+        print(f"❌ 쿼리 실행 에러: {e}")
+        return {"error": str(e), "query": sql_query}
+
+# --- [수정] ---
+def get_llm_response(user_question: str):
     
-    <script src='https://unpkg.com/maplibre-gl@4.1.3/dist/maplibre-gl.js'></script>
-    <link href='https://unpkg.com/maplibre-gl@4.1.3/dist/maplibre-gl.css' rel='stylesheet' />
-    
-    <style>
-        /* (기존 CSS와 동일) */
-        body { margin: 0; padding: 0; font-family: sans-serif; }
-        #map { position: absolute; top: 0; bottom: 0; width: 100%; }
-        #controls {
-            position: absolute; top: 20px; left: 20px; background: white;
-            padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            z-index: 10; width: 300px; max-height: 90vh; overflow-y: auto;
-            transition: transform 0.3s ease; 
-        }
-
-        #infoContainer {
-            position: absolute;
-            top: 20px;
-            right: 20px;
-            width: 340px; /* 300px (패널) + 40px (패딩) */
-            z-index: 10;
-            transition: transform 0.3s ease;
-            transform: translateX(0); /* 기본 상태: 보임 */
-        }
-        
-        #infoContainer.closed {
-            transform: translateX(340px); 
-        }
-
-        #infoPanel {
-            width: 300px;
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            max-height: 90vh;
-            overflow-y: auto;
-            float: right; /* 컨테이너의 오른쪽에 붙임 */
-        }
-
-        #infoToggleBtn {
-            position: absolute;
-            top: 0;
-            left: 0; /* 컨테이너의 왼쪽에 붙임 */
-            width: 40px;
-            height: 40px;
-            background-color: #007bff;
-            color: white;
-            border: none;
-            cursor: pointer;
-            border-radius: 8px 0 0 8px; /* 왼쪽만 둥글게 */
-            font-size: 16px;
-            font-weight: bold;
-            box-shadow: -2px 2px 10px rgba(0,0,0,0.1);
-        }
-
-        #status {
-            margin-top: 15px; font-size: 14px; color: #555; min-height: 40px;
-        }
-        #textInput {
-            width: 100%; height: 60px; padding: 10px; font-size: 14px;
-            border: 1px solid #ccc; border-radius: 5px; box-sizing: border-box; 
-            margin-bottom: 10px; resize: vertical; font-family: sans-serif;
-        }
-        #style-switcher { margin-bottom: 10px; }
-        #style-switcher h4 { margin: 0 0 5px 0; }
-        #mapStyleSelect {
-            width: 100%; padding: 8px; font-size: 14px; border: 1px solid #ccc;
-            border-radius: 5px; background-color: white;
-        }
-        #answerBox {
-            margin-top: 15px; padding: 10px; background: #f4f4f4;
-            border-radius: 5px; display: none;
-        }
-        #sqlResult {
-            position: absolute; bottom: 20px; left: 20px;
-            background: rgba(0,0,0,0.7); color: white; padding: 10px;
-            border-radius: 5px; z-index: 10; font-family: monospace;
-            max-width: 500px; max-height: 200px; overflow-y: auto;
-        }
-        .maplibregl-popup-content {
-            padding: 10px; background: rgba(255, 255, 255, 0.9);
-            box-shadow: 0 1px 5px rgba(0,0,0,0.2); border-radius: 5px; font-size: 13px;
-        }
-        .maplibregl-popup-content strong { color: #333; }
-    </style>
-</head>
-<body>
-
-<div id='map'></div>
-
-<div id="controls">
-    <div id="style-switcher">
-        <h4>배경지도 선택</h4>
-        <select id="mapStyleSelect">
-            <option value="streets-v2" selected>Streets (기본)</option>
-            <option value="streets-v2-dark">Streets (Dark)</option>
-            <option value="satellite">Satellite (위성)</option>
-            <option value="hybrid">Hybrid (위성 + 라벨)</option>
-            <option value="topo-v2">Topo (지형)</option>
-            <option value="basic-v2">Basic (단순)</option>
-        </select>
-    </div>
-    <hr style="margin: 20px 0;">
-    <h3>음성 명령</h3>
-    <button id="btnVoice" disabled>🎙️ (지도 로딩 중...)</button>
-    <div id="status">지도 로딩 중...</div>
-    <hr style="margin: 20px 0;">
-    <h3>텍스트 명령</h3>
-    <textarea id="textInput" placeholder="지도 로딩 중..." disabled></textarea>
-    <button id="btnSubmitText" disabled>분석 실행</button>
-    <div id="answerBox">
-        <h4>AI 답변:</h4>
-        <p id="answerText"></p>
-    </div>
-</div>
-
-<div id="infoContainer">
-    <div id="infoPanel">
-        <h3>안내문</h3>
-        <p style="font-size: 14px;">음성이나 텍스트로 지도 검색 및 제어, 그리고 공간분석을 할 수 있는 서비스입니다.</p>
-        
-        <h4>0. 기타</h4>
-        <ul>
-            <li>네가 지도로 할 수 있는 예문을 보여줘</li>
-        </ul>
-
-        <h4>1. 지도 검색</h4>
-        <ul>
-            <li>네가 가진 데이터 목록을 보여줘</li>
-            <li>녹번역 위치를 보여줘</li>
-            <li>녹번동 30년 넘은 건물 찾아줘</li>
-            <li>녹번동의 건물들을 10년 단위의 준공년도별로 단계구분도로 색상을 표시해줘</li>
-        </ul>
-
-        <h4>2. 지도 제어</h4>
-        <ul>
-            <li>지도 축소해줘</li>
-            <li>지도를 동쪽으로 이동해줘</li>
-            <li>위성 지도로 바꿔줘</li>
-            <li>야간 지도로 보여줘</li>
-            <li>지도를 3D 뷰로 보여줘</li>
-            <li>지도를 2D 뷰(평면)로 보여줘</li>
-        </ul>
-
-        <h4>3. 공간 분석</h4>
-        <ul>
-            <li>녹번역에서 100미터 반경 영역을 그려서 보여줘</li>
-            <li>녹번역에서 500미터 이내의 건물을 찾아줘</li>
-            <li>녹번역에서 가장 가까운 건물 2개를 찾아줘</li>
-            <li>모든 건물의 위치와 그 위치들을 묶은 경계 영역의 50m 반경영역을 그려줘</li>
-        </ul>
-    </div>
-    <button id="infoToggleBtn">&gt;</button> 
-</div>
-
-
-<pre id="sqlResult"></pre>
-
-
-<script>
-    // --- 1. UI 요소 ---
-    const btnVoice = document.getElementById('btnVoice');
-    const statusEl = document.getElementById('status');
-    const sqlResultEl = document.getElementById('sqlResult');
-    const textInput = document.getElementById('textInput');
-    const btnSubmitText = document.getElementById('btnSubmitText');
-    const answerBox = document.getElementById('answerBox');
-    const answerText = document.getElementById('answerText');
-    const styleSelect = document.getElementById('mapStyleSelect');
-    const speechRecognitionAvailable = window.SpeechRecognition || window.webkitSpeechRecognition;
-    const infoContainer = document.getElementById('infoContainer');
-    const infoToggleBtn = document.getElementById('infoToggleBtn');
-    const controlsPanel = document.getElementById('controls'); 
-
-    // --- 2. MapTiler 키 및 지도 초기화 ---
-    const mapTilerKey = 't2NOj07Xp2ihKwSzIP14'; 
-    const defaultStyle = 'streets-v2';
-    const baseCoords = [126.9380, 37.6000]; 
-
-    const map = new maplibregl.Map({
-        container: 'map',
-        style: `https://api.maptiler.com/maps/${defaultStyle}/style.json?key=${mapTilerKey}`,
-        center: baseCoords, 
-        zoom: 15
-    });
-
-    // --- 3. 분석 레이어 추가 함수 (동일) ---
-    function setupAnalysisLayers() {
-        if (!map.getSource('analysis-results')) {
-            map.addSource('analysis-results', {
-                type: 'geojson',
-                data: { type: 'FeatureCollection', features: [] }
-            });
-        }
-        
-        // 1. 폴리곤(영역) 레이어
-        if (!map.getLayer('results-polygons')) {
-            map.addLayer({
-                id: 'results-polygons', type: 'fill', source: 'analysis-results',
-                paint: { 'fill-color':'#0074D9', 'fill-opacity': 0.5 },
-                filter: ['==', ['geometry-type'], 'Polygon']
-            });
-        }
-
-        // 2. 점(포인트) 레이어 (단계구분도 포함)
-        if (!map.getLayer('results-points')) {
-            map.addLayer({
-                id: 'results-points', type: 'circle', source: 'analysis-results',
-                paint: {
-                    'circle-color': [
-                        'match', ['get', 'data_type'],
-                        'building', '#FF4136',  
-                        'station', '#0074D9',
-                        'subway_station', '#0074D9',
-                        '1980년 이전', '#FFFF00', 
-                        '1980년대', '#FFC300', 
-                        '1990년대', '#FF5733', 
-                        '2000년대', '#C70039', 
-                        '2010년대', '#900C3F', 
-                        '2020년 이후', '#581845',
-                        '#AAAAAA'
-                    ],
-                    'circle-radius': 8, 'circle-stroke-width': 2, 'circle-stroke-color': '#FFFFFF'
-                },
-                filter: ['==', ['geometry-type'], 'Point']
-            });
-        }
-        
-        // 3. 팝업 및 커서 이벤트 (동일)
-        map.on('click', (e) => {
-            const layersToQuery = ['results-points', 'results-polygons'];
-            if (!map.getLayer('results-points') || !map.getLayer('results-polygons')) {
-                return; 
-            }
-            const features = map.queryRenderedFeatures(e.point, { layers: layersToQuery });
-            if (!features.length) {
-                return; 
-            }
-            let pointFeature = features.find(f => f.layer.id === 'results-points');
-            let featureToShow = pointFeature ? pointFeature : features[0]; 
-            const properties = featureToShow.properties;
-            let htmlContent = "<div>";
-            for (const key in properties) {
-                if (key !== 'data_type') {
-                    htmlContent += `<strong>${key}:</strong> ${properties[key]}<br>`;
-                }
-            }
-            htmlContent += "</div>";
-            new maplibregl.Popup().setLngLat(e.lngLat).setHTML(htmlContent).addTo(map);
-        });
-
-        map.on('mousemove', (e) => {
-            const layersToQuery = ['results-points', 'results-polygons'];
-            if (!map.getLayer('results-points') || !map.getLayer('results-polygons')) {
-                map.getCanvas().style.cursor = ''; 
-                return; 
-            }
-            const features = map.queryRenderedFeatures(e.point, { layers: layersToQuery });
-            map.getCanvas().style.cursor = (features.length > 0) ? 'pointer' : '';
-        });
+    safety_settings = {
+        'HATE_SPEECH': 'BLOCK_NONE',
+        'HARASSMENT': 'BLOCK_NONE',
+        'SEXUALLY_EXPLICIT': 'BLOCK_NONE'
     }
 
-    // --- 4. 지도 로딩 완료 이벤트 (동일) ---
-    map.on('load', () => {
-        setupAnalysisLayers();
-        statusEl.textContent = "지도 로딩 완료. 명령 대기 중...";
-        if (speechRecognitionAvailable) {
-            btnVoice.disabled = false;
-            btnVoice.textContent = "🎙️ (눌러서 말하기)";
-        }
-        textInput.disabled = false;
-        textInput.placeholder = "예: 녹번역 500미터 이내 건물\n(Enter로도 실행 가능)";
-        btnSubmitText.disabled = false;
-    });
+    model = genai.GenerativeModel(
+        model_name='models/gemini-pro-latest',
+        system_instruction=f"""
+        당신은 최고의 GIS 전문가이자 범용 AI 비서입니다.
+        사용자의 질문을 받고, [데이터베이스 스키마]를 참고하여 질문의 의도를 3가지로 분류합니다.
+        
+        [규칙]
+        1.  **공간 분석/지도 표시 질문 (SPATIAL_QUERY)**:
+            - "건물 찾아줘", "녹번역 주변", "500미터 이내" 등 지도에 표시해야 하는 질문.
+            - 반드시 PostGIS SQL 쿼리를 생성해야 합니다.
+            - [중요!] 팝업에 모든 속성을 표시할 수 있도록, 원본 테이블의 **모든 컬럼을 선택 (`SELECT * ...`)** 해야 합니다.
+            - [중요!] 지도 시각화를 위해 `data_type` 컬럼을 꼭 포함해야 합니다.
+            - (일반 조회): `SELECT *, 'building' as data_type FROM buildings...`
+            - (단계구분도/주제도): "10년 단위로" 같은 요청 시, `data_type` 컬럼에 'building'이 아닌 **분류 값**을 넣어야 합니다.
+              (예: `SELECT *, CASE WHEN build_year < 1990 THEN '1990년 이전' ELSE '1990년 이후' END AS data_type FROM buildings...`)
+            - 응답 형식: {{"type": "SPATIAL_QUERY", "content": "SELECT ..."}}
 
-    // --- 5. 배경지도 변경 이벤트 (동일) ---
-    styleSelect.addEventListener('change', (e) => {
-        const styleId = e.target.value;
-        const newStyleUrl = `https://api.maptiler.com/maps/${styleId}/style.json?key=${mapTilerKey}`;
-        map.setStyle(newStyleUrl);
-    });
+        2.  **클라이언트 제어 명령 (CLIENT_COMMAND)**:
+            - "지도 확대/축소", "이동", "지도 스타일 변경" 등 **지도 자체를 조작**하는 명령.
+            - `content` 필드에 표준화된 명령어를 반환합니다.
 
-    map.on('style.load', () => {
-        setupAnalysisLayers();
-    });
-
-    // --- 6. 오른쪽 패널 토글 이벤트 (동일) ---
-    infoToggleBtn.addEventListener('click', () => {
-        infoContainer.classList.toggle('closed');
-        if (infoContainer.classList.contains('closed')) {
-            infoToggleBtn.textContent = '<'; // 닫혔을 때
-        } else {
-            infoToggleBtn.textContent = '>'; // 열렸을 때 (default)
-        }
-    });
-
-    // --- 7. 텍스트 입력 (동일) ---
-    btnSubmitText.addEventListener('click', submitText);
-    textInput.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' && !event.shiftKey) {
-            event.preventDefault(); 
-            submitText();
-        }
-    });
-
-    function submitText() {
-        const text = textInput.value.trim();
-        if (text === "") { return; }
-        statusEl.textContent = `입력된 텍스트: "${text}"`;
-        sqlResultEl.textContent = "";
-        answerBox.style.display = "none"; 
-        sendToBackend(text);
-    }
-
-    // --- 8. 백엔드 API 호출 (동일) ---
-    async function sendToBackend(text) {
-        statusEl.textContent = "백엔드에서 분석 중...";
-        const backendUrl = 'https://ai-sql-map-backend.onrender.com/analyze'; 
-
-        try {
-            const response = await fetch(backendUrl, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ text: text })
-            });
-            if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
-            const result = await response.json();
+            - (지도 조작): `ZOOM_IN`, `ZOOM_OUT`, `PAN_TO_BASE`
+            - (지도 이동): `PAN_EAST`, `PAN_WEST`, `PAN_NORTH`, `PAN_SOUTH`
             
-            if (result.type === "CLIENT_COMMAND") {
-                statusEl.textContent = "지도 제어 명령 수신.";
-                sqlResultEl.textContent = `[클라이언트 명령]\n${result.content}`;
-                handleClientCommand(result.content); 
+            # --- [수정] 3D/Pitch 및 위성 유의어 수정 ---
+            - (시점 변경): `SET_PITCH_3D`, `SET_PITCH_2D`
+            - (예: "3D로", "버드뷰", "항공뷰", "비스듬히", "기울여줘" -> {{"type": "CLIENT_COMMAND", "content": "SET_PITCH_3D"}})
+            - (예: "2D로", "평면으로", "정면으로" -> {{"type": "CLIENT_COMMAND", "content": "SET_PITCH_2D"}})
 
-            } else if (result.type === "FeatureCollection") {
-                statusEl.textContent = `분석 완료! ${result.features.length}개 결과 표시.`;
-                sqlResultEl.textContent = `[백엔드 정보]\nLLM이 생성한 SQL은 백엔드 터미널을 확인하세요.`;
-                updateMap(result);
-                answerBox.style.display = "none";
+            - (지도 스타일): `SET_STYLE_STREETS`, `SET_STYLE_DARK`, `SET_STYLE_SATELLITE`, `SET_STYLE_HYBRID`, `SET_STYLE_TOPO`, `SET_STYLE_BASIC`
+            - (예: "기본 지도로", "streets" -> {{"type": "CLIENT_COMMAND", "content": "SET_STYLE_STREETS"}})
+            - (예: "다크 모드", "야간 지도로", "어둡게" -> {{"type": "CLIENT_COMMAND", "content": "SET_STYLE_DARK"}})
+            - (예: "위성 지도로", "영상 지도로" -> {{"type": "CLIENT_COMMAND", "content": "SET_STYLE_SATELLITE"}})
+            # --- [수정 끝] ---
 
-            } else if (result.answer_text) {
-                statusEl.textContent = "AI 답변을 수신했습니다.";
-                answerText.textContent = result.answer_text;
-                answerBox.style.display = "block";
-                updateMap({ type: 'FeatureCollection', features: [] });
-                sqlResultEl.textContent = "[일반 텍스트 답변]";
+            - 응답 형식: {{"type": "CLIENT_COMMAND", "content": "ZOOM_OUT"}}
 
-            } else if (result.error) {
-                statusEl.textContent = "분석 오류 발생!";
-                sqlResultEl.textContent = `[백엔드 에러]\n${result.error}\n\n[생성된 쿼리]\n${result.query || 'N/A'}`;
-                updateMap({ type: 'FeatureCollection', features: [] });
+        3.  **일반/메타데이터 질문 (GENERAL_ANSWER)**:
+            - "네가 가진 데이터 목록 보여줘", "PostGIS가 뭐야?" 등.
+            - SQL을 생성하면 안 됩니다.
+            - 사용자의 질문에 대한 친절한 텍스트 답변을 생성합니다.
+            - 응답 형식: {{"type": "GENERAL_ANSWER", "content": "제가 가진 데이터는..."}}
 
-            } else {
-                throw new Error("알 수 없는 백엔드 응답 형식입니다.");
-            }
+        4.  오직 JSON 객체 하나만 응답해야 합니다. (설명, 마크다운 ```json ... ``` 금지)
+        5.  만약 질문을 분류하기 애매하다면, 무조건 {{"type": "GENERAL_ANSWER", "content": "질문을 이해하지 못했습니다."}} 를 반환하십시오.
+        6.  절대로 빈 문자열이나 null을 반환하지 마십시오.
 
-        } catch (error) {
-            console.error("Fetch Error:", error);
-            statusEl.textContent = "백엔드 서버 연결 실패!";
-            sqlResultEl.textContent = `백엔드 서버(${backendUrl}) 연결에 실패했습니다.\n(Error: ${error.message})\n\nRender.com 서버가 잠자기(cold start) 상태일 수 있습니다. 30초 후 다시 시도해 보세요.`;
-        }
-    }
+        {DATABASE_SCHEMA}
+        """,
+        safety_settings=safety_settings
+    )
 
-    // --- [수정] 9. 클라이언트 명령 처리 함수 (3D/Pitch 기능 추가) ---
-    function handleClientCommand(command) {
-        const panAmount = 100; // 100px
+    print(f"--- Gemini에게 보낼 질문: {user_question} ---")
+    try:
+        response = model.generate_content(user_question)
+        print(f"--- Gemini가 생성한 JSON 응답 (Raw) ---")
         
-        // 스타일 변경 헬퍼 함수
-        function changeMapStyle(styleValue) {
-            styleSelect.value = styleValue;
-            styleSelect.dispatchEvent(new Event('change'));
-        }
+        if not response.parts:
+            print("❌ Gemini 응답이 비어있습니다 (안전 필터에 의해 차단됨).")
+            return {"type": "GENERAL_ANSWER", "content": "AI가 응답을 거부했습니다. (안전 필터)"}
+
+        response_text = response.parts[0].text
+        print(response_text) # (마크다운 포함된 원본 텍스트)
         
-        switch (command) {
-            // 지도 조작
-            case 'ZOOM_IN':
-                map.zoomIn({ duration: 300 });
-                break;
-            case 'ZOOM_OUT':
-                map.zoomOut({ duration: 300 });
-                break;
-            case 'PAN_TO_BASE':
-                map.easeTo({ center: baseCoords, zoom: 15, pitch: 0, bearing: 0 }); // [수정] 2D로 리셋
-                break;
-            // 지도 이동
-            case 'PAN_EAST':
-                map.panBy([panAmount, 0], { duration: 300 });
-                break;
-            case 'PAN_WEST':
-                map.panBy([-panAmount, 0], { duration: 300 });
-                break;
-            case 'PAN_NORTH':
-                map.panBy([0, -panAmount], { duration: 300 });
-                break;
-            case 'PAN_SOUTH':
-                map.panBy([0, panAmount], { duration: 300 });
-                break;
+        # JSON 파싱 로직 (이전 수정본과 동일)
+        start_index = response_text.find('{')
+        end_index = response_text.rfind('}')
+        
+        if start_index != -1 and end_index != -1 and end_index > start_index:
+            json_string = response_text[start_index:end_index+1]
+            print(f"--- 파싱할 JSON 문자열 ---")
+            print(json_string)
+            return json.loads(json_string)
+        else:
+            print("❌ AI 응답에서 JSON 객체를 찾을 수 없습니다.")
+            return {"type": "GENERAL_ANSWER", "content": "AI가 유효한 JSON을 반환하지 않았습니다."}
 
-            // [NEW] 시점 변경 (Pitch)
-            case 'SET_PITCH_3D':
-                map.easeTo({ pitch: 60, duration: 1000 }); // 60도 기울이기
-                break;
-            case 'SET_PITCH_2D':
-                map.easeTo({ pitch: 0, duration: 1000 }); // 0도 (평면)
-                break;
-            // [NEW] 끝
-            
-            // 지도 스타일
-            case 'SET_STYLE_STREETS':
-                changeMapStyle('streets-v2');
-                break;
-            case 'SET_STYLE_DARK':
-                changeMapStyle('streets-v2-dark');
-                break;
-            case 'SET_STYLE_SATELLITE':
-                changeMapStyle('satellite');
-                break;
-            case 'SET_STYLE_HYBRID':
-                changeMapStyle('hybrid');
-                break;
-            case 'SET_STYLE_TOPO':
-                changeMapStyle('topo-v2');
-                break;
-            case 'SET_STYLE_BASIC':
-                changeMapStyle('basic-v2');
-                break;
+    except Exception as e:
+        print(f"❌ Gemini API 또는 JSON 파싱 에러: {e}")
+        return {"type": "GENERAL_ANSWER", "content": f"AI 응답 처리 중 오류가 발생했습니다: {e}"}
 
-            default:
-                console.warn("Unknown client command:", command);
-                statusEl.textContent = "알 수 없는 지도 명령입니다.";
-        }
-    }
-
-    // --- 10. 지도 업데이트 함수 (동일) ---
-    function updateMap(geojson) {
-        try {
-            const source = map.getSource('analysis-results');
-            if (source) {
-                source.setData(geojson);
-            }
-            if (geojson.features.length > 0) {
-                const bounds = new maplibregl.LngLatBounds();
-                
-                geojson.features.forEach(feature => {
-                    if (feature.geometry.type === 'Point') {
-                        bounds.extend(feature.geometry.coordinates);
-                    } else if (feature.geometry.type === 'Polygon' && feature.geometry.coordinates) {
-                        feature.geometry.coordinates.forEach(ring => {
-                            ring.forEach(coord => {
-                                bounds.extend(coord);
-                            });
-                        });
-                    }
-                });
-
-                if (geojson.features.length === 1 && geojson.features[0].geometry.type === 'Point') {
-                     map.flyTo({ center: geojson.features[0].geometry.coordinates, zoom: 16 });
-                } else {
-                     map.fitBounds(bounds, { padding: 100 });
-                }
-            }
-        } catch (error) {
-            console.error("Map update error:", error);
-            statusEl.textContent = "지도 업데이트 중 오류 발생.";
-        }
-    }
+# (@app.post("/analyze") ... 이하 파일 하단은 기존과 동일)
+@app.post("/analyze")
+async def analyze_voice_query(query: VoiceQuery):
     
-    // --- 11. 음성 인식 (동일) ---
-    if (speechRecognitionAvailable) {
-        const recognition = new SpeechRecognition();
-        recognition.lang = 'ko-KR';
-        recognition.continuous = false;
-        recognition.interimResults = false;
-        btnVoice.addEventListener('click', () => {
-            statusEl.textContent = "듣고 있습니다... 🎤";
-            btnVoice.style.backgroundColor = '#dc3545';
-            sqlResultEl.textContent = "";
-            answerBox.style.display = "none";
-            recognition.start();
-        });
-        recognition.onresult = (event) => {
-            const text = event.results[0][0].transcript;
-            statusEl.textContent = `인식된 Tекст: "${text}"`;
-            sendToBackend(text);
-        };
-        recognition.onend = () => {
-            btnVoice.style.backgroundColor = '#007bff';
-        };
-        recognition.onerror = (event) => {
-            statusEl.textContent = `음성 인식 오류: ${event.error}`;
-        };
-    }
-</script>
+    llm_response = get_llm_response(query.text)
+    
+    response_type = llm_response.get("type")
+    response_content = llm_response.get("content")
 
-</body>
-</html>
+    if response_type == "SPATIAL_QUERY":
+        if not response_content:
+            return {"error": "LLM이 SQL을 생성하지 못했습니다."}
+        
+        cleaned_sql = response_content.strip().rstrip(';')
+        geojson_result = execute_postgis_query(cleaned_sql)
+        return geojson_result
+
+    elif response_type == "CLIENT_COMMAND":
+        return {"type": "CLIENT_COMMAND", "content": response_content}
+    
+    elif response_type == "GENERAL_ANSWER":
+        return {"answer_text": response_content}
+    
+    else:
+        error_message = llm_response.get("content", "알 수 없는 오류")
+        return {"answer_text": f"오류가 발생했습니다: {error_message}"}
