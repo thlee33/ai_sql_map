@@ -33,16 +33,17 @@ DATABASE_SCHEMA = """
     - id (INT, Primary Key)
     - address (TEXT): 주소 (예: '녹번동 11-1')
     - build_year (INT): 건축 연도 (예: 1990)
-    - geom (GEOMETRY(Point, 4326)): 위치 (EPSG:4326 위경도)
+    - geom (GEOMETRY(Point, 4326)): 위치 (EPSG:4326 - 단위: '도')
 
 2.  subway_stations (지하철역 테이블)
     - id (INT, Primary Key)
     - station_name (TEXT): 역 이름 (예: '녹번역')
-    - geom (GEOMETRY(Point, 4326)): 위치 (EPSG:4326 위경도)
+    - geom (GEOMETRY(Point, 4326)): 위치 (EPSG:4326 - 단위: '도')
 
 [PostGIS 주요 함수]
-* ST_DWithin(geom1, geom2, distance_meters): 거리 내 검색
-* ST_Buffer(geom, distance_meters): 영역 생성
+* [중요!] 모든 거리/미터(meters) 단위 계산은 `geography` 타입으로 변환해야 합니다.
+* ST_DWithin (거리 내 검색): `ST_DWithin(geom::geography, (SELECT geom FROM ...)::geography, 500)`
+* ST_Buffer (반경 영역): `ST_Buffer(geom::geography, 50)::geometry` (결과는 `::geometry`로 다시 변환)
 """
 
 app = FastAPI()
