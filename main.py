@@ -1,4 +1,4 @@
-# main.py (Render.com 배포용 최종 수정본)
+# main.py (Render.com 배포용 - JSON 파싱 버그 수정)
 import os
 import psycopg
 import google.generativeai as genai
@@ -26,7 +26,7 @@ DB_NAME = os.environ.get("DB_NAME")
 DB_USER = os.environ.get("DB_USER")
 DB_PASS = os.environ.get("DB_PASS")
 
-# DB 스키마 정보 (기존과 동일)
+# DB 스키마 정보 ('geography' 타입 힌트 포함)
 DATABASE_SCHEMA = """
 [데이터베이스 스키마]
 1.  buildings (건물 테이블)
@@ -48,10 +48,9 @@ DATABASE_SCHEMA = """
 
 app = FastAPI()
 
-# [중요] CORS 설정: 모든 곳에서의 요청을 허용합니다 (FOSS4G 데모용)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # GitHub Pages 등 모든 도메인 허용
+    allow_origins=["*"], 
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -61,7 +60,6 @@ class VoiceQuery(BaseModel):
     text: str
 
 def execute_postgis_query(sql_query: str):
-    # DB 접속 정보가 하나라도 없으면 에러 반환
     if not all([DB_HOST, DB_NAME, DB_USER, DB_PASS]):
         print("❌ 쿼리 실행 에러: DB 환경 변수가 설정되지 않았습니다.")
         return {"error": "서버의 데이터베이스 연결 정보가 설정되지 않았습니다.", "query": sql_query}
@@ -97,6 +95,7 @@ def execute_postgis_query(sql_query: str):
         print(f"❌ 쿼리 실행 에러: {e}")
         return {"error": str(e), "query": sql_query}
 
+# --- [수정] ---
 def get_llm_response(user_question: str):
     
     safety_settings = {
@@ -120,13 +119,11 @@ def get_llm_response(user_question: str):
               (예: `SELECT *, 'building' as data_type FROM buildings...`)
             - 응답 형식: {{"type": "SPATIAL_QUERY", "content": "SELECT ..."}}
 
-        2.  **[NEW] 클라이언트 제어 명령 (CLIENT_COMMAND)**:
+        2.  **클라이언트 제어 명령 (CLIENT_COMMAND)**:
             - "지도 확대/축소", "줌인", "줌아웃", "이동", "위성 지도로 변경", "기본 지도로" 등 **지도 자체를 조작**하는 명령.
-            - 이것은 SQL이 아닙니다.
             - `content` 필드에 표준화된 명령어를 반환합니다.
             - (예: `ZOOM_IN`, `ZOOM_OUT`, `PAN_TO_BASE`, `SET_STYLE_SATELLITE`, `SET_STYLE_STREETS`)
             - 응답 형식: {{"type": "CLIENT_COMMAND", "content": "ZOOM_OUT"}}
-            - (예: "지도를 좀 작게 해줘" -> {{"type": "CLIENT_COMMAND", "content": "ZOOM_OUT"}})
 
         3.  **일반/메타데이터 질문 (GENERAL_ANSWER)**:
             - "네가 가진 데이터 목록 보여줘", "PostGIS가 뭐야?" 등.
@@ -146,24 +143,30 @@ def get_llm_response(user_question: str):
     print(f"--- Gemini에게 보낼 질문: {user_question} ---")
     try:
         response = model.generate_content(user_question)
-        print(f"--- Gemini가 생성한 JSON 응답 ---")
+        print(f"--- Gemini가 생성한 JSON 응답 (Raw) ---")
         
         if not response.parts:
             print("❌ Gemini 응답이 비어있습니다 (안전 필터에 의해 차단됨).")
             return {"type": "GENERAL_ANSWER", "content": "AI가 응답을 거부했습니다. (안전 필터)"}
 
         response_text = response.parts[0].text
-        print(response_text)
+        print(response_text) # (마크다운 포함된 원본 텍스트)
         
-        # [수정] Gemini가 ```json 또는 """json을 보내도 모두 제거
-        if "json" in response_text:
-            response_text = response_text.split("json", 1)[-1].strip()
-            if response_text.endswith("```"):
-                response_text = response_text[:-3].strip()
-            if response_text.endswith('"""'):
-                response_text = response_text[:-3].strip()
+        # --- [!!! 여기가 수정 지점 !!!] ---
+        # `split` 대신, 가장 안정적인 '{'와 '}'를 찾는 방식으로 변경
         
-        return json.loads(response_text)
+        start_index = response_text.find('{')
+        end_index = response_text.rfind('}')
+        
+        if start_index != -1 and end_index != -1 and end_index > start_index:
+            json_string = response_text[start_index:end_index+1]
+            print(f"--- 파싱할 JSON 문자열 ---")
+            print(json_string)
+            return json.loads(json_string)
+        else:
+            print("❌ AI 응답에서 JSON 객체를 찾을 수 없습니다.")
+            return {"type": "GENERAL_ANSWER", "content": "AI가 유효한 JSON을 반환하지 않았습니다."}
+        # --- [수정 끝] ---
 
     except Exception as e:
         print(f"❌ Gemini API 또는 JSON 파싱 에러: {e}")
@@ -185,8 +188,7 @@ async def analyze_voice_query(query: VoiceQuery):
         geojson_result = execute_postgis_query(cleaned_sql)
         return geojson_result
 
-    elif response_type == "CLIENT_COMMAND": # [NEW]
-        # AI가 "CLIENT_COMMAND"라고 분류하면, content를 그대로 프론트엔드에 전달
+    elif response_type == "CLIENT_COMMAND":
         return {"type": "CLIENT_COMMAND", "content": response_content}
     
     elif response_type == "GENERAL_ANSWER":
@@ -195,4 +197,3 @@ async def analyze_voice_query(query: VoiceQuery):
     else:
         error_message = llm_response.get("content", "알 수 없는 오류")
         return {"answer_text": f"오류가 발생했습니다: {error_message}"}
-
