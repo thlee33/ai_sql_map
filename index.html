@@ -8,14 +8,79 @@
     <link href='https://unpkg.com/maplibre-gl@4.1.3/dist/maplibre-gl.css' rel='stylesheet' />
     
     <style>
-        /* (기존 CSS와 동일) */
         body { margin: 0; padding: 0; font-family: sans-serif; }
         #map { position: absolute; top: 0; bottom: 0; width: 100%; }
+        
+        /* --- [수정] 왼쪽 컨트롤 패널 --- */
         #controls {
             position: absolute; top: 20px; left: 20px; background: white;
             padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             z-index: 10; width: 300px; max-height: 90vh; overflow-y: auto;
+            transition: transform 0.3s ease; /* [NEW] 애니메이션 */
         }
+
+        /* --- [NEW] 오른쪽 정보 패널 스타일 --- */
+        #infoPanel {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            width: 300px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            z-index: 10;
+            max-height: 90vh;
+            overflow-y: auto;
+            transition: transform 0.3s ease;
+            transform: translateX(0); /* 기본 상태: 보임 */
+        }
+
+        #infoPanel.closed {
+            transform: translateX(calc(100% + 40px)); /* 100% + padding + gap */
+        }
+
+        #infoToggleBtn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 11;
+            padding: 10px;
+            background-color: #007bff;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 8px 0 0 8px; /* 왼쪽만 둥글게 */
+            font-size: 16px;
+            font-weight: bold;
+            box-shadow: -2px 2px 10px rgba(0,0,0,0.1);
+            transition: transform 0.3s ease;
+            transform: translateX(0); /* 기본 상태 */
+        }
+        
+        #infoPanel.closed + #infoToggleBtn {
+            transform: translateX(-340px); /* 패널 너비(300) + 패딩(20*2) */
+        }
+
+        #infoPanel h4 {
+            margin-top: 15px;
+            margin-bottom: 5px;
+            border-bottom: 1px solid #eee;
+            padding-bottom: 5px;
+        }
+        #infoPanel ul {
+            padding-left: 20px;
+            font-size: 14px;
+            list-style-type: none;
+        }
+        #infoPanel ul li {
+            margin-bottom: 8px;
+            padding: 5px;
+            background: #f9f9f9;
+            border-radius: 3px;
+        }
+        /* --- [NEW] 스타일 끝 --- */
+
         #status {
             margin-top: 15px; font-size: 14px; color: #555; min-height: 40px;
         }
@@ -77,11 +142,46 @@
     </div>
 </div>
 
+<div id="infoPanel">
+    <h3>안내문</h3>
+    <p style="font-size: 14px;">음성이나 텍스트로 지도 검색 및 제어, 그리고 공간분석을 할 수 있는 서비스입니다.</p>
+    
+    <h4>0. 기타</h4>
+    <ul>
+        <li>네가 지도로 할 수 있는 예문을 보여줘</li>
+    </ul>
+
+    <h4>1. 지도 검색</h4>
+    <ul>
+        <li>네가 가진 데이터 목록을 보여줘</li>
+        <li>녹번역 위치를 보여줘</li>
+        <li>녹번동 30년 넘은 건물 찾아줘</li>
+        <li>녹번동의 건물들을 10년 단위의 준공년도별로 단계구분도로 색상을 표시해줘</li>
+    </ul>
+
+    <h4>2. 지도 제어</h4>
+    <ul>
+        <li>지도 축소해줘</li>
+        <li>지도를 동쪽으로 이동해줘</li>
+    </ul>
+
+    <h4>3. 공간 분석</h4>
+    <ul>
+        <li>녹번역에서 100미터 반경 영역을 그려서 보여줘</li>
+        <li>녹번역에서 500미터 이내의 건물을 찾아줘</li>
+        <li>녹번역에서 가장 가까운 건물 2개를 찾아줘</li>
+        <li>모든 건물의 위치와 그 위치들을 묶은 경계 영역의 50m 반경영역을 그려줘</li>
+    </ul>
+</div>
+
+<button id="infoToggleBtn">&lt;</button>
+
+
 <pre id="sqlResult"></pre>
 
 
 <script>
-    // --- 1. UI 요소 (동일) ---
+    // --- 1. UI 요소 (패널 요소 추가) ---
     const btnVoice = document.getElementById('btnVoice');
     const statusEl = document.getElementById('status');
     const sqlResultEl = document.getElementById('sqlResult');
@@ -91,6 +191,11 @@
     const answerText = document.getElementById('answerText');
     const styleSelect = document.getElementById('mapStyleSelect');
     const speechRecognitionAvailable = window.SpeechRecognition || window.webkitSpeechRecognition;
+
+    // [NEW] 오른쪽 패널 UI
+    const infoPanel = document.getElementById('infoPanel');
+    const infoToggleBtn = document.getElementById('infoToggleBtn');
+    const controlsPanel = document.getElementById('controls'); // 왼쪽 패널
 
     // --- 2. MapTiler 키 및 지도 초기화 ---
     const mapTilerKey = 't2NOj07Xp2ihKwSzIP14'; // 👈 사용자님이 입력하신 키
@@ -104,7 +209,7 @@
         zoom: 15
     });
 
-    // --- 3. 분석 레이어 추가 함수 ---
+    // --- 3. 분석 레이어 추가 함수 (동일) ---
     function setupAnalysisLayers() {
         if (!map.getSource('analysis-results')) {
             map.addSource('analysis-results', {
@@ -113,63 +218,54 @@
             });
         }
         
-        // --- 1. 폴리곤(영역) 레이어 ---
+        // 1. 폴리곤(영역) 레이어
         if (!map.getLayer('results-polygons')) {
             map.addLayer({
-                id: 'results-polygons',
-                type: 'fill',
-                source: 'analysis-results',
-                paint: {
-                    'fill-color':'#0074D9', 
-                    'fill-opacity': 0.5     
-		},
+                id: 'results-polygons', type: 'fill', source: 'analysis-results',
+                paint: { 'fill-color':'#0074D9', 'fill-opacity': 0.5 },
                 filter: ['==', ['geometry-type'], 'Polygon']
             });
         }
 
-        // --- 2. 점(포인트) 레이어 ---
+        // 2. 점(포인트) 레이어
         if (!map.getLayer('results-points')) {
             map.addLayer({
-                id: 'results-points',
-                type: 'circle', 
-                source: 'analysis-results',
+                id: 'results-points', type: 'circle', source: 'analysis-results',
                 paint: {
                     'circle-color': [
-                        'match',
-                        ['get', 'data_type'],
+                        'match', ['get', 'data_type'],
+                        // 1. 기본 타입
                         'building', '#FF4136',  
                         'station', '#0074D9',
                         'subway_station', '#0074D9',
+                        // 2. 단계구분도 타입
+                        '1980년 이전', '#FFFF00', // 노란색
+                        '1980년대', '#FFC300', // 주황색
+                        '1990년대', '#FF5733', // 진한 주황
+                        '2000년대', '#C70039', // 붉은색
+                        '2010년대', '#900C3F', // 진홍색
+                        '2020년 이후', '#581845', // 보라색
+                        // 3. Fallback
                         '#AAAAAA'
                     ],
-                    'circle-radius': 8,
-                    'circle-stroke-width': 2,
-                    'circle-stroke-color': '#FFFFFF'
+                    'circle-radius': 8, 'circle-stroke-width': 2, 'circle-stroke-color': '#FFFFFF'
                 },
                 filter: ['==', ['geometry-type'], 'Point']
             });
         }
-
-        // --- 3. [수정] 팝업 및 커서 이벤트 (버그 수정) ---
         
-        // [수정] 맵 전체에 대한 클릭 이벤트 리스너
+        // 3. 팝업 및 커서 이벤트 (동일)
         map.on('click', (e) => {
             const layersToQuery = ['results-points', 'results-polygons'];
-            
-            // [FIX] 쿼리하기 전에 레이어가 존재하는지 확인
             if (!map.getLayer('results-points') || !map.getLayer('results-polygons')) {
-                return; // 레이어가 아직 로드되지 않았으므로 쿼리 중지
+                return; 
             }
-
             const features = map.queryRenderedFeatures(e.point, { layers: layersToQuery });
-
             if (!features.length) {
-                return; // 클릭한 곳에 피처 없음
+                return; 
             }
-
             let pointFeature = features.find(f => f.layer.id === 'results-points');
             let featureToShow = pointFeature ? pointFeature : features[0]; 
-
             const properties = featureToShow.properties;
             let htmlContent = "<div>";
             for (const key in properties) {
@@ -178,32 +274,18 @@
                 }
             }
             htmlContent += "</div>";
-
-            new maplibregl.Popup()
-                .setLngLat(e.lngLat)
-                .setHTML(htmlContent)
-                .addTo(map);
+            new maplibregl.Popup().setLngLat(e.lngLat).setHTML(htmlContent).addTo(map);
         });
 
-        // [수정] 마우스 커서 변경을 위한 mousemove 이벤트
         map.on('mousemove', (e) => {
             const layersToQuery = ['results-points', 'results-polygons'];
-
-            // [FIX] 쿼리하기 전에 레이어가 존재하는지 확인
             if (!map.getLayer('results-points') || !map.getLayer('results-polygons')) {
-                map.getCanvas().style.cursor = ''; // 레이어 없으면 기본 커서
+                map.getCanvas().style.cursor = ''; 
                 return; 
             }
-
             const features = map.queryRenderedFeatures(e.point, { layers: layersToQuery });
-
-            if (features.length > 0) {
-                map.getCanvas().style.cursor = 'pointer';
-            } else {
-                map.getCanvas().style.cursor = '';
-            }
+            map.getCanvas().style.cursor = (features.length > 0) ? 'pointer' : '';
         });
-        // --- [수정] 끝 ---
     }
 
     // --- 4. 지도 로딩 완료 이벤트 (동일) ---
@@ -213,9 +295,6 @@
         if (speechRecognitionAvailable) {
             btnVoice.disabled = false;
             btnVoice.textContent = "🎙️ (눌러서 말하기)";
-        } else {
-            statusEl.textContent = "오류: 이 브라우저는 음성 인식을 지원하지 않습니다.";
-            btnVoice.textContent = "🎙️ (음성인식 불가)";
         }
         textInput.disabled = false;
         textInput.placeholder = "예: 녹번역 500미터 이내 건물\n(Enter로도 실행 가능)";
@@ -233,7 +312,19 @@
         setupAnalysisLayers();
     });
 
-    // --- 6. 텍스트 입력 (동일) ---
+    // --- [NEW] 6. 오른쪽 패널 토글 이벤트 ---
+    infoToggleBtn.addEventListener('click', () => {
+        infoPanel.classList.toggle('closed');
+        if (infoPanel.classList.contains('closed')) {
+            infoToggleBtn.textContent = '>'; // 닫혔을 때
+        } else {
+            infoToggleBtn.textContent = '<'; // 열렸을 때
+        }
+    });
+    // --- [NEW] 끝 ---
+
+
+    // --- 7. 텍스트 입력 (동일) ---
     btnSubmitText.addEventListener('click', submitText);
     textInput.addEventListener('keydown', (event) => {
         if (event.key === 'Enter' && !event.shiftKey) {
@@ -251,8 +342,8 @@
         sendToBackend(text);
     }
 
-    // --- 7. 백엔드 API 호출 (Render.com 용) ---
-async function sendToBackend(text) {
+    // --- 8. 백엔드 API 호출 (Render.com 용) ---
+    async function sendToBackend(text) {
         statusEl.textContent = "백엔드에서 분석 중...";
         const backendUrl = 'https://ai-sql-map-backend.onrender.com/analyze'; 
 
@@ -270,12 +361,10 @@ async function sendToBackend(text) {
                 sqlResultEl.textContent = `[클라이언트 명령]\n${result.content}`;
                 handleClientCommand(result.content); 
 
-            // --- [!!! 여기가 수정 지점 !!!] ---
-            // 'SPATIAL_QUERY' 대신 'FeatureCollection'을 확인합니다.
             } else if (result.type === "FeatureCollection") {
                 statusEl.textContent = `분석 완료! ${result.features.length}개 결과 표시.`;
                 sqlResultEl.textContent = `[백엔드 정보]\nLLM이 생성한 SQL은 백엔드 터미널을 확인하세요.`;
-                updateMap(result); // result가 GeoJSON 그 자체임
+                updateMap(result);
                 answerBox.style.display = "none";
 
             } else if (result.answer_text) {
@@ -301,11 +390,9 @@ async function sendToBackend(text) {
         }
     }
 
-    // --- 8. 클라이언트 명령 처리 함수 ---
+    // --- 9. 클라이언트 명령 처리 함수 (동일) ---
     function handleClientCommand(command) {
-        // [NEW] 지도 이동 거리 (px)
-        const panAmount = 100; 
-
+        const panAmount = 100; // 100px
         switch (command) {
             case 'ZOOM_IN':
                 map.zoomIn({ duration: 300 });
@@ -316,22 +403,18 @@ async function sendToBackend(text) {
             case 'PAN_TO_BASE':
                 map.flyTo({ center: baseCoords, zoom: 15 });
                 break;
-            
-            // --- [수정] ---
-            case 'PAN_EAST': // (예: "오른쪽으로", "동쪽으로")
+            case 'PAN_EAST':
                 map.panBy([panAmount, 0], { duration: 300 });
                 break;
-            case 'PAN_WEST': // (예: "왼쪽으로")
+            case 'PAN_WEST':
                 map.panBy([-panAmount, 0], { duration: 300 });
                 break;
-            case 'PAN_NORTH': // (예: "위로")
+            case 'PAN_NORTH':
                 map.panBy([0, -panAmount], { duration: 300 });
                 break;
-            case 'PAN_SOUTH': // (예: "아래로")
+            case 'PAN_SOUTH':
                 map.panBy([0, panAmount], { duration: 300 });
                 break;
-            // --- [수정 끝] ---
-
             case 'SET_STYLE_SATELLITE':
                 styleSelect.value = 'satellite';
                 styleSelect.dispatchEvent(new Event('change')); 
@@ -346,7 +429,7 @@ async function sendToBackend(text) {
         }
     }
 
-    // --- 지도 업데이트 함수 ---
+    // --- 10. 지도 업데이트 함수 (동일) ---
     function updateMap(geojson) {
         try {
             const source = map.getSource('analysis-results');
@@ -380,7 +463,7 @@ async function sendToBackend(text) {
         }
     }
     
-    // --- 9. 음성 인식 ---
+    // --- 11. 음성 인식 (동일) ---
     if (speechRecognitionAvailable) {
         const recognition = new SpeechRecognition();
         recognition.lang = 'ko-KR';
