@@ -244,10 +244,10 @@
         sendToBackend(text);
     }
 
-    // --- 7. 백엔드 API 호출 (동일) ---
-    async function sendToBackend(text) {
+    // --- 7. 백엔드 API 호출  ---
+async function sendToBackend(text) {
         statusEl.textContent = "백엔드에서 분석 중...";
-        const backendUrl = 'https://ai-sql-map-backend.onrender.com/analyze';   //http://127.0.0.1:8000/analyze
+        const backendUrl = '[http://127.0.0.1:8000/analyze](http://127.0.0.1:8000/analyze)'; 
 
         try {
             const response = await fetch(backendUrl, {
@@ -258,32 +258,68 @@
             if (!response.ok) throw new Error(`HTTP error! status: ${response.status}`);
             const result = await response.json();
             
-            if (result.answer_text) {
+            // --- [NEW] 백엔드 응답 라우팅 ---
+            if (result.type === "CLIENT_COMMAND") {
+                statusEl.textContent = "지도 제어 명령 수신.";
+                sqlResultEl.textContent = `[클라이언트 명령]\n${result.content}`;
+                handleClientCommand(result.content); // [NEW] 새 함수 호출
+
+            } else if (result.type === "SPATIAL_QUERY") {
+                statusEl.textContent = `분석 완료! ${result.features.length}개 결과 표시.`;
+                sqlResultEl.textContent = `[백엔드 정보]\nLLM이 생성한 SQL은 백엔드 터미널을 확인하세요.`;
+                updateMap(result);
+                answerBox.style.display = "none";
+
+            } else if (result.answer_text) {
                 statusEl.textContent = "AI 답변을 수신했습니다.";
                 answerText.textContent = result.answer_text;
                 answerBox.style.display = "block";
                 updateMap({ type: 'FeatureCollection', features: [] });
                 sqlResultEl.textContent = "[일반 텍스트 답변]";
-            } else if (result.type === "FeatureCollection") {
-                statusEl.textContent = `분석 완료! ${result.features.length}개 결과 표시.`;
-                sqlResultEl.textContent = `[백엔드 정보]\nLLM이 생성한 SQL은 백엔드 터미널을 확인하세요.`;
-                updateMap(result);
-                answerBox.style.display = "none";
+
             } else if (result.error) {
                 statusEl.textContent = "분석 오류 발생!";
                 sqlResultEl.textContent = `[백엔드 에러]\n${result.error}\n\n[생성된 쿼리]\n${result.query || 'N/A'}`;
                 updateMap({ type: 'FeatureCollection', features: [] });
+
             } else {
                 throw new Error("알 수 없는 백엔드 응답 형식입니다.");
             }
+
         } catch (error) {
             console.error("Fetch Error:", error);
-            statusEl.textContent = "서버 통신 중 오류 발생!";
-            sqlResultEl.textContent = `(Error: ${error.message})\n백엔드 서버 로그를 확인하세요.`;
+            statusEl.textContent = "백엔드 서버 연결 실패!";
+            sqlResultEl.textContent = `로컬 백엔드(main.py)가 실행 중인지 확인하세요.\n(Error: ${error.message})`;
         }
     }
 
-    // --- 8. 지도 업데이트 함수 (동일, 오류 수정본) ---
+    // --- 8. [NEW] 클라이언트 명령 처리 함수 ---
+    function handleClientCommand(command) {
+        switch (command) {
+            case 'ZOOM_IN':
+                map.zoomIn({ duration: 300 });
+                break;
+            case 'ZOOM_OUT':
+                map.zoomOut({ duration: 300 });
+                break;
+            case 'PAN_TO_BASE':
+                map.flyTo({ center: baseCoords, zoom: 15 });
+                break;
+            case 'SET_STYLE_SATELLITE':
+                styleSelect.value = 'satellite';
+                styleSelect.dispatchEvent(new Event('change')); // 드롭다운 변경 이벤트 강제 실행
+                break;
+            case 'SET_STYLE_STREETS':
+                styleSelect.value = 'streets-v2';
+                styleSelect.dispatchEvent(new Event('change')); // 드롭다운 변경 이벤트 강제 실행
+                break;
+            default:
+                console.warn("Unknown client command:", command);
+                statusEl.textContent = "알 수 없는 지도 명령입니다.";
+        }
+    }
+
+    // --- 지도 업데이트 함수  ---
     function updateMap(geojson) {
         try {
             const source = map.getSource('analysis-results');
@@ -315,7 +351,7 @@
         }
     }
     
-    // --- 9. 음성 인식 (동일) ---
+    // --- 9. 음성 인식  ---
     if (speechRecognitionAvailable) {
         const recognition = new SpeechRecognition();
         recognition.lang = 'ko-KR';
