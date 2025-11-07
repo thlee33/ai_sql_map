@@ -247,7 +247,7 @@
     // --- 7. 백엔드 API 호출  ---
 async function sendToBackend(text) {
         statusEl.textContent = "백엔드에서 분석 중...";
-        const backendUrl = 'https://ai-sql-map-backend.onrender.com'; 
+        const backendUrl = 'https://ai-sql-map-backend.onrender.com/analyze'; 
 
         try {
             const response = await fetch(backendUrl, {
