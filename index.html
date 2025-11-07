@@ -270,10 +270,12 @@ async function sendToBackend(text) {
                 sqlResultEl.textContent = `[클라이언트 명령]\n${result.content}`;
                 handleClientCommand(result.content); 
 
-            } else if (result.type === "SPATIAL_QUERY") {
+            // --- [!!! 여기가 수정 지점 !!!] ---
+            // 'SPATIAL_QUERY' 대신 'FeatureCollection'을 확인합니다.
+            } else if (result.type === "FeatureCollection") {
                 statusEl.textContent = `분석 완료! ${result.features.length}개 결과 표시.`;
                 sqlResultEl.textContent = `[백엔드 정보]\nLLM이 생성한 SQL은 백엔드 터미널을 확인하세요.`;
-                updateMap(result);
+                updateMap(result); // result가 GeoJSON 그 자체임
                 answerBox.style.display = "none";
 
             } else if (result.answer_text) {
@@ -295,7 +297,6 @@ async function sendToBackend(text) {
         } catch (error) {
             console.error("Fetch Error:", error);
             statusEl.textContent = "백엔드 서버 연결 실패!";
-            // [수정] 오류 메시지를 "클라우드" 환경에 맞게 변경
             sqlResultEl.textContent = `백엔드 서버(${backendUrl}) 연결에 실패했습니다.\n(Error: ${error.message})\n\nRender.com 서버가 잠자기(cold start) 상태일 수 있습니다. 30초 후 다시 시도해 보세요.`;
         }
     }
