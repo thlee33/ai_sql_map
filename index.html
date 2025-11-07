@@ -303,6 +303,9 @@ async function sendToBackend(text) {
 
     // --- 8. 클라이언트 명령 처리 함수 ---
     function handleClientCommand(command) {
+        // [NEW] 지도 이동 거리 (px)
+        const panAmount = 100; 
+
         switch (command) {
             case 'ZOOM_IN':
                 map.zoomIn({ duration: 300 });
@@ -313,6 +316,22 @@ async function sendToBackend(text) {
             case 'PAN_TO_BASE':
                 map.flyTo({ center: baseCoords, zoom: 15 });
                 break;
+            
+            // --- [수정] ---
+            case 'PAN_EAST': // (예: "오른쪽으로", "동쪽으로")
+                map.panBy([panAmount, 0], { duration: 300 });
+                break;
+            case 'PAN_WEST': // (예: "왼쪽으로")
+                map.panBy([-panAmount, 0], { duration: 300 });
+                break;
+            case 'PAN_NORTH': // (예: "위로")
+                map.panBy([0, -panAmount], { duration: 300 });
+                break;
+            case 'PAN_SOUTH': // (예: "아래로")
+                map.panBy([0, panAmount], { duration: 300 });
+                break;
+            // --- [수정 끝] ---
+
             case 'SET_STYLE_SATELLITE':
                 styleSelect.value = 'satellite';
                 styleSelect.dispatchEvent(new Event('change')); 

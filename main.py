@@ -123,7 +123,12 @@ def get_llm_response(user_question: str):
             - "지도 확대/축소", "줌인", "줌아웃", "이동", "위성 지도로 변경", "기본 지도로" 등 **지도 자체를 조작**하는 명령.
             - `content` 필드에 표준화된 명령어를 반환합니다.
             - (예: `ZOOM_IN`, `ZOOM_OUT`, `PAN_TO_BASE`, `SET_STYLE_SATELLITE`, `SET_STYLE_STREETS`)
+            # --- [수정] ---
+            - (지도 이동 표준 명령어: `PAN_EAST`, `PAN_WEST`, `PAN_NORTH`, `PAN_SOUTH`)
             - 응답 형식: {{"type": "CLIENT_COMMAND", "content": "ZOOM_OUT"}}
+            - (예: "지도를 오른쪽으로 이동해줘" 또는 "동쪽으로" -> {{"type": "CLIENT_COMMAND", "content": "PAN_EAST"}})
+            - (예: "지도를 위로 이동해줘" 또는 "북쪽으로" -> {{"type": "CLIENT_COMMAND", "content": "PAN_NORTH"}})
+            # --- [수정 끝] ---
 
         3.  **일반/메타데이터 질문 (GENERAL_ANSWER)**:
             - "네가 가진 데이터 목록 보여줘", "PostGIS가 뭐야?" 등.
@@ -152,9 +157,7 @@ def get_llm_response(user_question: str):
         response_text = response.parts[0].text
         print(response_text) # (마크다운 포함된 원본 텍스트)
         
-        # --- [!!! 여기가 수정 지점 !!!] ---
-        # `split` 대신, 가장 안정적인 '{'와 '}'를 찾는 방식으로 변경
-        
+        # JSON 파싱 로직 (이전 수정본과 동일)
         start_index = response_text.find('{')
         end_index = response_text.rfind('}')
         
@@ -166,11 +169,11 @@ def get_llm_response(user_question: str):
         else:
             print("❌ AI 응답에서 JSON 객체를 찾을 수 없습니다.")
             return {"type": "GENERAL_ANSWER", "content": "AI가 유효한 JSON을 반환하지 않았습니다."}
-        # --- [수정 끝] ---
 
     except Exception as e:
         print(f"❌ Gemini API 또는 JSON 파싱 에러: {e}")
         return {"type": "GENERAL_ANSWER", "content": f"AI 응답 처리 중 오류가 발생했습니다: {e}"}
+
 
 @app.post("/analyze")
 async def analyze_voice_query(query: VoiceQuery):
