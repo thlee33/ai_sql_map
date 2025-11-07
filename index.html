@@ -289,7 +289,8 @@ async function sendToBackend(text) {
         } catch (error) {
             console.error("Fetch Error:", error);
             statusEl.textContent = "백엔드 서버 연결 실패!";
-            sqlResultEl.textContent = `로컬 백엔드(main.py)가 실행 중인지 확인하세요.\n(Error: ${error.message})`;
+            // [수정] 오류 메시지를 "클라우드" 환경에 맞게 변경
+            sqlResultEl.textContent = `백엔드 서버(${backendUrl}) 연결에 실패했습니다.\n(Error: ${error.message})\n\nRender.com 서버가 잠자기(cold start) 상태일 수 있습니다. 30초 후 다시 시도해 보세요.`;
         }
     }
 

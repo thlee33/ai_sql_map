@@ -154,8 +154,13 @@ def get_llm_response(user_question: str):
         response_text = response.parts[0].text
         print(response_text)
         
-        if "```json" in response_text:
-            response_text = response_text.split("```json")[1].split("```")[0].strip()
+        # [수정] Gemini가 ```json 또는 """json을 보내도 모두 제거
+        if "json" in response_text:
+            response_text = response_text.split("json", 1)[-1].strip()
+            if response_text.endswith("```"):
+                response_text = response_text[:-3].strip()
+            if response_text.endswith('"""'):
+                response_text = response_text[:-3].strip()
         
         return json.loads(response_text)
 
@@ -190,20 +195,3 @@ async def analyze_voice_query(query: VoiceQuery):
         error_message = llm_response.get("content", "알 수 없는 오류")
         return {"answer_text": f"오류가 발생했습니다: {error_message}"}
 
-# (로컬 테스트용 uvicorn 실행 - Render에서는 사용되지 않음)
-if __name__ == "__main__":
-    import uvicorn
-    # .env 파일이 있는지 확인
-    if not all([DB_HOST, DB_NAME, DB_USER, DB_PASS, os.environ.get("GOOGLE_API_KEY")]):
-        print("="*50)
-        print("경고: .env 파일에 DB 및 API 키 정보가 없습니다.")
-        print("로컬 테스트를 하시려면 .env 파일에 다음을 설정하세요:")
-        print("GOOGLE_API_KEY=...")
-        print("DB_HOST=localhost")
-        print("DB_PORT=5432")
-        print("DB_NAME=postgres")
-        print("DB_USER=postgres")
-        print("DB_PASS=...")
-        print("="*50)
-    
-    uvicorn.run(app, host="127.0.0.1", port=8000)
