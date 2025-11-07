@@ -8,44 +8,47 @@
     <link href='https://unpkg.com/maplibre-gl@4.1.3/dist/maplibre-gl.css' rel='stylesheet' />
     
     <style>
+        /* (기존 CSS와 동일) */
         body { margin: 0; padding: 0; font-family: sans-serif; }
         #map { position: absolute; top: 0; bottom: 0; width: 100%; }
-        
-        /* --- [수정] 왼쪽 컨트롤 패널 --- */
         #controls {
             position: absolute; top: 20px; left: 20px; background: white;
             padding: 20px; border-radius: 8px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             z-index: 10; width: 300px; max-height: 90vh; overflow-y: auto;
-            transition: transform 0.3s ease; /* [NEW] 애니메이션 */
+            transition: transform 0.3s ease; 
         }
 
-        /* --- [NEW] 오른쪽 정보 패널 스타일 --- */
-        #infoPanel {
+        #infoContainer {
             position: absolute;
             top: 20px;
             right: 20px;
+            width: 340px; /* 300px (패널) + 40px (패딩) */
+            z-index: 10;
+            transition: transform 0.3s ease;
+            transform: translateX(0); /* 기본 상태: 보임 */
+        }
+        
+        #infoContainer.closed {
+            transform: translateX(340px); 
+        }
+
+        #infoPanel {
             width: 300px;
             background: white;
             padding: 20px;
             border-radius: 8px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-            z-index: 10;
             max-height: 90vh;
             overflow-y: auto;
-            transition: transform 0.3s ease;
-            transform: translateX(0); /* 기본 상태: 보임 */
-        }
-
-        #infoPanel.closed {
-            transform: translateX(calc(100% + 40px)); /* 100% + padding + gap */
+            float: right; /* 컨테이너의 오른쪽에 붙임 */
         }
 
         #infoToggleBtn {
             position: absolute;
-            top: 20px;
-            right: 20px;
-            z-index: 11;
-            padding: 10px;
+            top: 0;
+            left: 0; /* 컨테이너의 왼쪽에 붙임 */
+            width: 40px;
+            height: 40px;
             background-color: #007bff;
             color: white;
             border: none;
@@ -54,32 +57,7 @@
             font-size: 16px;
             font-weight: bold;
             box-shadow: -2px 2px 10px rgba(0,0,0,0.1);
-            transition: transform 0.3s ease;
-            transform: translateX(0); /* 기본 상태 */
         }
-        
-        #infoPanel.closed + #infoToggleBtn {
-            transform: translateX(-340px); /* 패널 너비(300) + 패딩(20*2) */
-        }
-
-        #infoPanel h4 {
-            margin-top: 15px;
-            margin-bottom: 5px;
-            border-bottom: 1px solid #eee;
-            padding-bottom: 5px;
-        }
-        #infoPanel ul {
-            padding-left: 20px;
-            font-size: 14px;
-            list-style-type: none;
-        }
-        #infoPanel ul li {
-            margin-bottom: 8px;
-            padding: 5px;
-            background: #f9f9f9;
-            border-radius: 3px;
-        }
-        /* --- [NEW] 스타일 끝 --- */
 
         #status {
             margin-top: 15px; font-size: 14px; color: #555; min-height: 40px;
@@ -142,46 +120,50 @@
     </div>
 </div>
 
-<div id="infoPanel">
-    <h3>안내문</h3>
-    <p style="font-size: 14px;">음성이나 텍스트로 지도 검색 및 제어, 그리고 공간분석을 할 수 있는 서비스입니다.</p>
-    
-    <h4>0. 기타</h4>
-    <ul>
-        <li>네가 지도로 할 수 있는 예문을 보여줘</li>
-    </ul>
+<div id="infoContainer">
+    <div id="infoPanel">
+        <p style="font-size: 14px;">음성이나 텍스트로 지도 검색 및 제어, 그리고 공간분석을 할 수 있는 서비스입니다.</p>
+        
+        <h4>0. 기타</h4>
+        <ul>
+            <li>네가 지도로 할 수 있는 예문을 보여줘</li>
+        </ul>
 
-    <h4>1. 지도 검색</h4>
-    <ul>
-        <li>네가 가진 데이터 목록을 보여줘</li>
-        <li>녹번역 위치를 보여줘</li>
-        <li>녹번동 30년 넘은 건물 찾아줘</li>
-        <li>녹번동의 건물들을 10년 단위의 준공년도별로 단계구분도로 색상을 표시해줘</li>
-    </ul>
+        <h4>1. 지도 검색</h4>
+        <ul>
+            <li>네가 가진 데이터 목록을 보여줘</li>
+            <li>녹번역 위치를 보여줘</li>
+            <li>녹번동 30년 넘은 건물 찾아줘</li>
+            <li>녹번동의 건물들을 10년 단위의 준공년도별로 단계구분도로 색상을 표시해줘</li>
+        </ul>
 
-    <h4>2. 지도 제어</h4>
-    <ul>
-        <li>지도 축소해줘</li>
-        <li>지도를 동쪽으로 이동해줘</li>
-    </ul>
+        <h4>2. 지도 제어</h4>
+        <ul>
+            <li>지도 축소해줘</li>
+            <li>지도를 동쪽으로 이동해줘</li>
+            <li>위성 지도로 바꿔줘</li>
+            <li>야간 지도로 보여줘</li>
+            <li>지도를 3D 뷰로 보여줘</li>
+            <li>지도를 2D 뷰(평면)로 보여줘</li>
+        </ul>
 
-    <h4>3. 공간 분석</h4>
-    <ul>
-        <li>녹번역에서 100미터 반경 영역을 그려서 보여줘</li>
-        <li>녹번역에서 500미터 이내의 건물을 찾아줘</li>
-        <li>녹번역에서 가장 가까운 건물 2개를 찾아줘</li>
-        <li>모든 건물의 위치와 그 위치들을 묶은 경계 영역의 50m 반경영역을 그려줘</li>
-    </ul>
+        <h4>3. 공간 분석</h4>
+        <ul>
+            <li>녹번역에서 100미터 반경 영역을 그려서 보여줘</li>
+            <li>녹번역에서 500미터 이내의 건물을 찾아줘</li>
+            <li>녹번역에서 가장 가까운 건물 2개를 찾아줘</li>
+            <li>모든 건물의 위치와 그 위치들을 묶은 경계 영역의 50m 반경영역을 그려줘</li>
+        </ul>
+    </div>
+    <button id="infoToggleBtn">&gt;</button> 
 </div>
-
-<button id="infoToggleBtn">&lt;</button>
 
 
 <pre id="sqlResult"></pre>
 
 
 <script>
-    // --- 1. UI 요소 (패널 요소 추가) ---
+    // --- 1. UI 요소 ---
     const btnVoice = document.getElementById('btnVoice');
     const statusEl = document.getElementById('status');
     const sqlResultEl = document.getElementById('sqlResult');
@@ -191,16 +173,14 @@
     const answerText = document.getElementById('answerText');
     const styleSelect = document.getElementById('mapStyleSelect');
     const speechRecognitionAvailable = window.SpeechRecognition || window.webkitSpeechRecognition;
-
-    // [NEW] 오른쪽 패널 UI
-    const infoPanel = document.getElementById('infoPanel');
+    const infoContainer = document.getElementById('infoContainer');
     const infoToggleBtn = document.getElementById('infoToggleBtn');
-    const controlsPanel = document.getElementById('controls'); // 왼쪽 패널
+    const controlsPanel = document.getElementById('controls'); 
 
     // --- 2. MapTiler 키 및 지도 초기화 ---
-    const mapTilerKey = 't2NOj07Xp2ihKwSzIP14'; // 👈 사용자님이 입력하신 키
+    const mapTilerKey = 't2NOj07Xp2ihKwSzIP14'; 
     const defaultStyle = 'streets-v2';
-    const baseCoords = [126.9380, 37.6000]; // 녹번역 중심
+    const baseCoords = [126.9380, 37.6000]; 
 
     const map = new maplibregl.Map({
         container: 'map',
@@ -227,25 +207,22 @@
             });
         }
 
-        // 2. 점(포인트) 레이어
+        // 2. 점(포인트) 레이어 (단계구분도 포함)
         if (!map.getLayer('results-points')) {
             map.addLayer({
                 id: 'results-points', type: 'circle', source: 'analysis-results',
                 paint: {
                     'circle-color': [
                         'match', ['get', 'data_type'],
-                        // 1. 기본 타입
                         'building', '#FF4136',  
                         'station', '#0074D9',
                         'subway_station', '#0074D9',
-                        // 2. 단계구분도 타입
-                        '1980년 이전', '#FFFF00', // 노란색
-                        '1980년대', '#FFC300', // 주황색
-                        '1990년대', '#FF5733', // 진한 주황
-                        '2000년대', '#C70039', // 붉은색
-                        '2010년대', '#900C3F', // 진홍색
-                        '2020년 이후', '#581845', // 보라색
-                        // 3. Fallback
+                        '1980년 이전', '#FFFF00', 
+                        '1980년대', '#FFC300', 
+                        '1990년대', '#FF5733', 
+                        '2000년대', '#C70039', 
+                        '2010년대', '#900C3F', 
+                        '2020년 이후', '#581845',
                         '#AAAAAA'
                     ],
                     'circle-radius': 8, 'circle-stroke-width': 2, 'circle-stroke-color': '#FFFFFF'
@@ -312,17 +289,15 @@
         setupAnalysisLayers();
     });
 
-    // --- [NEW] 6. 오른쪽 패널 토글 이벤트 ---
+    // --- 6. 오른쪽 패널 토글 이벤트 (동일) ---
     infoToggleBtn.addEventListener('click', () => {
-        infoPanel.classList.toggle('closed');
-        if (infoPanel.classList.contains('closed')) {
-            infoToggleBtn.textContent = '>'; // 닫혔을 때
+        infoContainer.classList.toggle('closed');
+        if (infoContainer.classList.contains('closed')) {
+            infoToggleBtn.textContent = '<'; // 닫혔을 때
         } else {
-            infoToggleBtn.textContent = '<'; // 열렸을 때
+            infoToggleBtn.textContent = '>'; // 열렸을 때 (default)
         }
     });
-    // --- [NEW] 끝 ---
-
 
     // --- 7. 텍스트 입력 (동일) ---
     btnSubmitText.addEventListener('click', submitText);
@@ -342,7 +317,7 @@
         sendToBackend(text);
     }
 
-    // --- 8. 백엔드 API 호출 (Render.com 용) ---
+    // --- 8. 백엔드 API 호출 (동일) ---
     async function sendToBackend(text) {
         statusEl.textContent = "백엔드에서 분석 중...";
         const backendUrl = 'https://ai-sql-map-backend.onrender.com/analyze'; 
@@ -390,10 +365,18 @@
         }
     }
 
-    // --- 9. 클라이언트 명령 처리 함수 (동일) ---
+    // --- [수정] 9. 클라이언트 명령 처리 함수 (3D/Pitch 기능 추가) ---
     function handleClientCommand(command) {
         const panAmount = 100; // 100px
+        
+        // 스타일 변경 헬퍼 함수
+        function changeMapStyle(styleValue) {
+            styleSelect.value = styleValue;
+            styleSelect.dispatchEvent(new Event('change'));
+        }
+        
         switch (command) {
+            // 지도 조작
             case 'ZOOM_IN':
                 map.zoomIn({ duration: 300 });
                 break;
@@ -401,8 +384,9 @@
                 map.zoomOut({ duration: 300 });
                 break;
             case 'PAN_TO_BASE':
-                map.flyTo({ center: baseCoords, zoom: 15 });
+                map.easeTo({ center: baseCoords, zoom: 15, pitch: 0, bearing: 0 }); // [수정] 2D로 리셋
                 break;
+            // 지도 이동
             case 'PAN_EAST':
                 map.panBy([panAmount, 0], { duration: 300 });
                 break;
@@ -415,14 +399,36 @@
             case 'PAN_SOUTH':
                 map.panBy([0, panAmount], { duration: 300 });
                 break;
-            case 'SET_STYLE_SATELLITE':
-                styleSelect.value = 'satellite';
-                styleSelect.dispatchEvent(new Event('change')); 
+
+            // [NEW] 시점 변경 (Pitch)
+            case 'SET_PITCH_3D':
+                map.easeTo({ pitch: 60, duration: 1000 }); // 60도 기울이기
                 break;
+            case 'SET_PITCH_2D':
+                map.easeTo({ pitch: 0, duration: 1000 }); // 0도 (평면)
+                break;
+            // [NEW] 끝
+            
+            // 지도 스타일
             case 'SET_STYLE_STREETS':
-                styleSelect.value = 'streets-v2';
-                styleSelect.dispatchEvent(new Event('change')); 
+                changeMapStyle('streets-v2');
                 break;
+            case 'SET_STYLE_DARK':
+                changeMapStyle('streets-v2-dark');
+                break;
+            case 'SET_STYLE_SATELLITE':
+                changeMapStyle('satellite');
+                break;
+            case 'SET_STYLE_HYBRID':
+                changeMapStyle('hybrid');
+                break;
+            case 'SET_STYLE_TOPO':
+                changeMapStyle('topo-v2');
+                break;
+            case 'SET_STYLE_BASIC':
+                changeMapStyle('basic-v2');
+                break;
+
             default:
                 console.warn("Unknown client command:", command);
                 statusEl.textContent = "알 수 없는 지도 명령입니다.";
