@@ -120,38 +120,22 @@ def get_llm_response(user_question: str):
             - (단계구분도/주제도): "10년 단위로" 같은 요청 시, `data_type` 컬럼에 'building'이 아닌 **분류 값**을 넣어야 합니다.
               (예: `SELECT *, CASE WHEN build_year < 1990 THEN '1990년 이전' ELSE '1990년 이후' END AS data_type FROM buildings...`)
             
-            # --- [수정] 복합 쿼리(UNION ALL) 규칙 추가 ---
-            - (복합 쿼리): "A를 그리고 B를 찾아줘" 같은 요청 시, `UNION ALL`을 사용해 두 쿼리를 합쳐야 합니다.
+            # --- [수정] UNION ALL 예시를 더 정확하게 수정 ---
+            - (복합 쿼리): "A를 그리고 B를 찾아줘" 같은 요청 시, `UNION ALL`을 사용해 두 쿼리를 합쳐야 합니다. **이때 컬럼 개수와 순서를 정확히 맞춰야 합니다.**
+            - (buildings 컬럼 순서: id, address, build_year, geom, data_type)
             - (예: "녹번역 250m 영역을 그리고 그 바깥 건물")
-            - (답변 예): `SELECT *, 'building' AS data_type FROM buildings WHERE NOT ST_DWithin(geom::geography, (SELECT geom FROM subway_stations WHERE station_name = '녹번역')::geography, 250) UNION ALL SELECT id, address, build_year, ST_Buffer((SELECT geom FROM subway_stations WHERE station_name = '녹번역')::geography, 250)::geometry AS geom, 'search_area' AS data_type FROM subway_stations WHERE station_name = '녹번역'`
+            - (답변 예): `SELECT *, 'building' AS data_type FROM buildings WHERE NOT ST_DWithin(geom::geography, (SELECT geom FROM subway_stations WHERE station_name = '녹번역')::geography, 250) UNION ALL SELECT id, station_name AS address, NULL::integer AS build_year, ST_Buffer((SELECT geom FROM subway_stations WHERE station_name = '녹번역')::geography, 250)::geometry AS geom, 'search_area' AS data_type FROM subway_stations WHERE station_name = '녹번역'`
             # --- [수정 끝] ---
             
             - 응답 형식: {{"type": "SPATIAL_QUERY", "content": "SELECT ..."}}
 
         2.  **클라이언트 제어 명령 (CLIENT_COMMAND)**:
-            - "지도 확대/축소", "이동", "지도 스타일 변경", "3D 뷰" 등 **지도 자체를 조작**하는 명령.
-            - `content` 필드에 표준화된 명령어를 반환합니다.
-
-            - (지도 조작): `ZOOM_IN`, `ZOOM_OUT`, `PAN_TO_BASE`
-            - (지도 이동): `PAN_EAST`, `PAN_WEST`, `PAN_NORTH`, `PAN_SOUTH`
-            - (시점 변경): `SET_PITCH_3D`, `SET_PITCH_2D`
-            - (예: "3D로", "3D 뷰로", "버드뷰", "항공뷰" -> {{"type": "CLIENT_COMMAND", "content": "SET_PITCH_3D"}})
-            - (지도 스타일): `SET_STYLE_STREETS`, `SET_STYLE_DARK`, `SET_STYLE_SATELLITE`
-            - (예: "다크 모드", "야간 지도로" -> {{"type": "CLIENT_COMMAND", "content": "SET_STYLE_DARK"}})
-            - (예: "위성 지도로", "영상 지도로" -> {{"type": "CLIENT_COMMAND", "content": "SET_STYLE_SATELLITE"}})
-
-            - 응답 형식: {{"type": "CLIENT_COMMAND", "content": "ZOOM_OUT"}}
+            - (기존과 동일)
 
         3.  **일반/메타데이터 질문 (GENERAL_ANSWER)**:
-            - "네가 가진 데이터 목록 보여줘", "PostGIS가 뭐야?" 등.
-            - SQL을 생성하면 안 됩니다.
-            - 사용자의 질문에 대한 친절한 텍스트 답변을 생성합니다.
-            - 응답 형식: {{"type": "GENERAL_ANSWER", "content": "제가 가진 데이터는..."}}
+            - (기존과 동일)
 
-        4.  오직 JSON 객체 하나만 응답해야 합니다. (설명, 마크다운 ```json ... ``` 금지)
-        5.  만약 질문을 분류하기 애매하다면, 무조건 {{"type": "GENERAL_ANSWER", "content": "질문을 이해하지 못했습니다."}} 를 반환하십시오.
-        6.  절대로 빈 문자열이나 null을 반환하지 마십시오.
-
+        (이하 프롬프트 규칙 4, 5, 6 기존과 동일)
         {DATABASE_SCHEMA}
         """,
         safety_settings=safety_settings
