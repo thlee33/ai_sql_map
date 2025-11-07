@@ -97,15 +97,19 @@ def execute_postgis_query(sql_query: str):
         return {"error": str(e), "query": sql_query}
 
 def get_llm_response(user_question: str):
+    
     safety_settings = {
         'HATE_SPEECH': 'BLOCK_NONE',
         'HARASSMENT': 'BLOCK_NONE',
         'SEXUALLY_EXPLICIT': 'BLOCK_NONE'
     }
+
     model = genai.GenerativeModel(
         model_name='models/gemini-pro-latest',
         system_instruction=f"""
         당신은 최고의 GIS 전문가이자 범용 AI 비서입니다.
+        사용자의 질문을 받고, [데이터베이스 스키마]를 참고하여 질문의 의도를 3가지로 분류합니다.
+        
         [규칙]
         1.  **공간 분석/지도 표시 질문 (SPATIAL_QUERY)**:
             - "건물 찾아줘", "녹번역 주변", "500미터 이내" 등 지도에 표시해야 하는 질문.
@@ -113,51 +117,75 @@ def get_llm_response(user_question: str):
             - [중요!] 팝업에 모든 속성을 표시할 수 있도록, 원본 테이블의 **모든 컬럼을 선택 (`SELECT * ...`)** 해야 합니다.
             - [중요!] 지도 시각화를 위해 `data_type` 컬럼을 꼭 포함해야 합니다.
               (예: `SELECT *, 'building' as data_type FROM buildings...`)
-              (예: `SELECT *, 'station' as data_type FROM subway_stations...`)
-            - (버퍼 생성 시): `SELECT ST_Buffer(...) AS geom, 'search_area' AS data_type ...`
-            - `geom` 컬럼은 필수입니다. (이미 `*`에 포함되어 있거나 AS geom으로 지정됨)
             - 응답 형식: {{"type": "SPATIAL_QUERY", "content": "SELECT ..."}}
 
-        2.  **일반/메타데이터 질문 (GENERAL_ANSWER)**:
-            - "네가 가진 데이터 목록 보여줘" 등 SQL과 관련 없는 질문.
+        2.  **[NEW] 클라이언트 제어 명령 (CLIENT_COMMAND)**:
+            - "지도 확대/축소", "줌인", "줌아웃", "이동", "위성 지도로 변경", "기본 지도로" 등 **지도 자체를 조작**하는 명령.
+            - 이것은 SQL이 아닙니다.
+            - `content` 필드에 표준화된 명령어를 반환합니다.
+            - (예: `ZOOM_IN`, `ZOOM_OUT`, `PAN_TO_BASE`, `SET_STYLE_SATELLITE`, `SET_STYLE_STREETS`)
+            - 응답 형식: {{"type": "CLIENT_COMMAND", "content": "ZOOM_OUT"}}
+            - (예: "지도를 좀 작게 해줘" -> {{"type": "CLIENT_COMMAND", "content": "ZOOM_OUT"}})
+
+        3.  **일반/메타데이터 질문 (GENERAL_ANSWER)**:
+            - "네가 가진 데이터 목록 보여줘", "PostGIS가 뭐야?" 등.
             - SQL을 생성하면 안 됩니다.
             - 사용자의 질문에 대한 친절한 텍스트 답변을 생성합니다.
-            - 응답 형식: {{"type": "GENERAL_ANSWER", "content": "제가 가진 데이터는 건물과 지하철역 정보입니다."}}
-        
-        3.  오직 JSON 객체 하나만 응답해야 합니다. (설명, 마크다운 ```json ... ``` 금지)
-        4.  만약 질문을 1 또는 2로 분류하기 애매하다면, 무조건 {{"type": "GENERAL_ANSWER", "content": "질문을 이해하지 못했습니다."}} 를 반환하십시오.
-        5.  절대로 빈 문자열이나 null을 반환하지 마십시오.
+            - 응답 형식: {{"type": "GENERAL_ANSWER", "content": "제가 가진 데이터는..."}}
+
+        4.  오직 JSON 객체 하나만 응답해야 합니다. (설명, 마크다운 ```json ... ``` 금지)
+        5.  만약 질문을 분류하기 애매하다면, 무조건 {{"type": "GENERAL_ANSWER", "content": "질문을 이해하지 못했습니다."}} 를 반환하십시오.
+        6.  절대로 빈 문자열이나 null을 반환하지 마십시오.
 
         {DATABASE_SCHEMA}
         """,
         safety_settings=safety_settings
     )
+
+    print(f"--- Gemini에게 보낼 질문: {user_question} ---")
     try:
         response = model.generate_content(user_question)
+        print(f"--- Gemini가 생성한 JSON 응답 ---")
+        
         if not response.parts:
             print("❌ Gemini 응답이 비어있습니다 (안전 필터에 의해 차단됨).")
             return {"type": "GENERAL_ANSWER", "content": "AI가 응답을 거부했습니다. (안전 필터)"}
+
         response_text = response.parts[0].text
+        print(response_text)
+        
         if "```json" in response_text:
             response_text = response_text.split("```json")[1].split("```")[0].strip()
+        
         return json.loads(response_text)
+
     except Exception as e:
         print(f"❌ Gemini API 또는 JSON 파싱 에러: {e}")
         return {"type": "GENERAL_ANSWER", "content": f"AI 응답 처리 중 오류가 발생했습니다: {e}"}
 
 @app.post("/analyze")
 async def analyze_voice_query(query: VoiceQuery):
+    
     llm_response = get_llm_response(query.text)
+    
     response_type = llm_response.get("type")
     response_content = llm_response.get("content")
+
     if response_type == "SPATIAL_QUERY":
         if not response_content:
             return {"error": "LLM이 SQL을 생성하지 못했습니다."}
+        
         cleaned_sql = response_content.strip().rstrip(';')
         geojson_result = execute_postgis_query(cleaned_sql)
         return geojson_result
+
+    elif response_type == "CLIENT_COMMAND": # [NEW]
+        # AI가 "CLIENT_COMMAND"라고 분류하면, content를 그대로 프론트엔드에 전달
+        return {"type": "CLIENT_COMMAND", "content": response_content}
+    
     elif response_type == "GENERAL_ANSWER":
         return {"answer_text": response_content}
+    
     else:
         error_message = llm_response.get("content", "알 수 없는 오류")
         return {"answer_text": f"오류가 발생했습니다: {error_message}"}
