@@ -1,4 +1,4 @@
-# main.py (Render.com 배포용 - 3D/Pitch 기능 추가)
+# main.py (Render.com 배포용 - "3D 뷰" 유의어 추가)
 import os
 import psycopg
 import google.generativeai as genai
@@ -128,9 +128,9 @@ def get_llm_response(user_question: str):
             - (지도 조작): `ZOOM_IN`, `ZOOM_OUT`, `PAN_TO_BASE`
             - (지도 이동): `PAN_EAST`, `PAN_WEST`, `PAN_NORTH`, `PAN_SOUTH`
             
-            # --- [수정] 3D/Pitch 및 위성 유의어 수정 ---
+            # --- [수정] "3D 뷰" 유의어 추가 ---
             - (시점 변경): `SET_PITCH_3D`, `SET_PITCH_2D`
-            - (예: "3D로", "버드뷰", "항공뷰", "비스듬히", "기울여줘" -> {{"type": "CLIENT_COMMAND", "content": "SET_PITCH_3D"}})
+            - (예: "3D로", "3D 뷰로", "버드뷰", "항공뷰", "비스듬히", "기울여줘" -> {{"type": "CLIENT_COMMAND", "content": "SET_PITCH_3D"}})
             - (예: "2D로", "평면으로", "정면으로" -> {{"type": "CLIENT_COMMAND", "content": "SET_PITCH_2D"}})
 
             - (지도 스타일): `SET_STYLE_STREETS`, `SET_STYLE_DARK`, `SET_STYLE_SATELLITE`, `SET_STYLE_HYBRID`, `SET_STYLE_TOPO`, `SET_STYLE_BASIC`
