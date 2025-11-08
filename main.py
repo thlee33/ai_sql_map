@@ -40,7 +40,7 @@ DATABASE_SCHEMA = """
     - "kor_sta_nm" (TEXT): 역이름 (예: '녹번')
     - geom (GEOMETRY(Point, 4326)): 위치 (EPSG:4326)
 
-3.  restaurants (서울시 음식점)
+3.  restaurant (서울시 음식점)
     - "사업장명" (TEXT): 가게 이름 (예: '부어치킨')
     - "업태구분명" (TEXT): 업종 (예: '한식', '중식', '분식', '일반음식점')
     - "소재지전체주소" (TEXT): 주소
@@ -132,9 +132,8 @@ def get_llm_response(user_question: str):
             - (음식점 조회): "맛집", "음식점", "한식", "중식", "분식" 등은 `restaurants` 테이블을 사용합니다.
             - (음식점 필터링): `WHERE "업태구분명" = '한식'` 또는 `WHERE "업태구분명" = '중식'` 또는 `WHERE "업태구분명" = '분식'` 또는 `WHERE "업태구분명" = '일반음식점'`을 사용하세요.
             - "카페"는 이 데이터에 없다고 `GENERAL_ANSWER`로 응답하세요.
-            - "맛집" 또는 "음식점"이라고만 하면 `WHERE "영업상태명" = '영업/정상'`만 적용하고 "업태구분명"은 필터링하지 마세요.
-            - (예: "녹번역 300m 이내 한식 맛집"): `SELECT T1.*, 'restaurant' AS data_type FROM restaurants AS T1 JOIN subway_stations AS T2 ON ST_DWithin(T1.geom::geography, T2.geom::geography, 300) WHERE T2."kor_sta_nm" = '녹번' AND T1."업태구분명" = '한식' AND T1."영업상태명" = '영업/정상'`
-            - (예: "녹번역 근처 음식점"): `SELECT T1.*, 'restaurant' AS data_type FROM restaurants AS T1 JOIN subway_stations AS T2 ON ST_DWithin(T1.geom::geography, T2.geom::geography, 500) WHERE T2."kor_sta_nm" = '녹번' AND T1."영업상태명" = '영업/정상'`
+            - (예: "녹번역 300m 이내 한식 맛집"): `SELECT T1.*, 'restaurant' AS data_type FROM restaurants AS T1 JOIN subway_stations AS T2 ON ST_DWithin(T1.geom::geography, T2.geom::geography, 300) WHERE T2."kor_sta_nm" = '녹번' AND T1."업태구분명" = '한식'`
+            - (예: "녹번역 근처 음식점"): `SELECT T1.*, 'restaurant' AS data_type FROM restaurants AS T1 JOIN subway_stations AS T2 ON ST_DWithin(T1.geom::geography, T2.geom::geography, 500) WHERE T2."kor_sta_nm" = '녹번' `
             - (단계구분도): "10년 단위로" 같은 요청 시, `data_type` 컬럼에 'building'이 아닌 **분류 값**을 넣어야 합니다.
             - (복합 쿼리): "A를 그리고 B를 찾아줘" 같은 요청 시, `UNION ALL`을 사용해 두 쿼리를 합쳐야 합니다. **(컬럼 개수와 순서를 정확히 맞춰야 합니다!)**
             - (복합 쿼리 예): `SELECT *, 'building' AS data_type FROM buildings WHERE NOT ST_DWithin(...) UNION ALL SELECT NULL::integer AS gid, NULL AS "BJDONG_NM", 'search_area' AS "BLD_NM", ... (컬럼 개수 맞추기) ... , ST_Buffer(...) AS geom, 'search_area' AS data_type FROM subway_stations ...`
