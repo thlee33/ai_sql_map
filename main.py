@@ -105,7 +105,7 @@ def get_llm_response(user_question: str):
     }
 
     model = genai.GenerativeModel(
-        model_name='models/gemini-pro-latest',
+        model_name='models/gemini-flash-latest',  #models/gemini-pro-latest
         system_instruction=f"""
         당신은 최고의 GIS 전문가이자 범용 AI 비서입니다.
         사용자의 질문을 받고, [데이터베이스 스키마]를 참고하여 질문의 의도를 3가지로 분류합니다.
