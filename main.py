@@ -1,4 +1,4 @@
-# main.py (Render.com 배포용 - "3D 뷰" 유의어 추가)
+# main.py (Render.com 배포용 - 'restaurants' 유의어 추가)
 import os
 import psycopg
 import google.generativeai as genai
@@ -26,25 +26,33 @@ DB_NAME = os.environ.get("DB_NAME")
 DB_USER = os.environ.get("DB_USER")
 DB_PASS = os.environ.get("DB_PASS")
 
-# DB 스키마 정보 ('geography' 타입 힌트 포함)
+# --- [수정] 3. 'restaurants' 테이블 스키마 추가 ---
 DATABASE_SCHEMA = """
 [데이터베이스 스키마]
-1.  buildings (건물 테이블)
-    - id (INT, Primary Key)
-    - address (TEXT): 주소 (예: '녹번동 11-1')
-    - build_year (INT): 건축 연도 (예: 1990)
-    - geom (GEOMETRY(Point, 4326)): 위치 (EPSG:4326 - 단위: '도')
+1.  buildings (서울시 건물)
+    - "BJDONG_NM" (TEXT): 법정동명 (예: '녹번동')
+    - "BLD_NM" (TEXT): 건물명
+    - "USE_APR_DAY" (TEXT): 사용승인일 (예: '19900101')
+    - "MAIN_PURPS_CD_NM" (TEXT): 건물 주용도 (예: '단독주택', '아파트')
+    - geom (GEOMETRY(Point, 4326)): 위치 (EPSG:4326)
 
-2.  subway_stations (지하철역 테이블)
-    - id (INT, Primary Key)
-    - station_name (TEXT): 역 이름 (예: '녹번역')
-    - geom (GEOMETRY(Point, 4326)): 위치 (EPSG:4326 - 단위: '도')
+2.  subway_stations (서울시 지하철역)
+    - "kor_sta_nm" (TEXT): 역이름 (예: '녹번')
+    - geom (GEOMETRY(Point, 4326)): 위치 (EPSG:4326)
+
+3.  restaurants (서울시 음식점)
+    - "사업장명" (TEXT): 가게 이름 (예: '부어치킨')
+    - "업태구분명" (TEXT): 업종 (예: '한식', '중식', '분식', '일반음식점')
+    - "소재지전체주소" (TEXT): 주소
+    - "영업상태명" (TEXT): 영업 상태 (예: '영업/정상')
+    - geom (GEOMETRY(Point, 4326)): 위치 (EPSG:4326)
 
 [PostGIS 주요 함수]
 * [중요!] 모든 거리/미터(meters) 단위 계산은 `geography` 타입으로 변환해야 합니다.
-* ST_DWithin (거리 내 검색): `ST_DWithin(geom::geography, (SELECT geom FROM ...)::geography, 500)`
-* ST_Buffer (반경 영역): `ST_Buffer(geom::geography, 50)::geometry` (결과는 `::geometry`로 다시 변환)
+* ST_DWithin (거리 내 검색): `ST_DWithin(a.geom::geography, b.geom::geography, 500)`
+* ST_Buffer (반경 영역): `ST_Buffer(geom::geography, 50)::geometry`
 """
+# --- [수정 끝] ---
 
 app = FastAPI()
 
@@ -105,50 +113,46 @@ def get_llm_response(user_question: str):
     }
 
     model = genai.GenerativeModel(
-        model_name='models/gemini-flash-latest',  #models/gemini-pro-latest
+        # [수정!] Flash 모델로 변경 (속도 향상)
+        model_name='models/gemini-flash-latest',
         system_instruction=f"""
         당신은 최고의 GIS 전문가이자 범용 AI 비서입니다.
         사용자의 질문을 받고, [데이터베이스 스키마]를 참고하여 질문의 의도를 3가지로 분류합니다.
         
         [규칙]
         1.  **공간 분석/지도 표시 질문 (SPATIAL_QUERY)**:
-            - "건물 찾아줘", "녹번역 주변", "500미터 이내" 등 지도에 표시해야 하는 질문.
+            - "건물 찾아줘", "녹번역 주변", "500미터 이내", "맛집" 등 지도에 표시해야 하는 질문.
             - 반드시 PostGIS SQL 쿼리를 생성해야 합니다.
             - [중요!] 팝업에 모든 속성을 표시할 수 있도록, 원본 테이블의 **모든 컬럼을 선택 (`SELECT * ...`)** 해야 합니다.
             - [중요!] 지도 시각화를 위해 `data_type` 컬럼을 꼭 포함해야 합니다.
-            - (일반 조회): `SELECT *, 'building' as data_type FROM buildings...`
-            - (단계구분도/주제도): "10년 단위로" 같은 요청 시, `data_type` 컬럼에 'building'이 아닌 **분류 값**을 넣어야 합니다.
-              (예: `SELECT *, CASE WHEN build_year < 1990 THEN '1990년 이전' ELSE '1990년 이후' END AS data_type FROM buildings...`)
-            - (복합 쿼리): "A를 그리고 B를 찾아줘" 같은 요청 시, `UNION ALL`을 사용해 두 쿼리를 합쳐야 합니다. **이때 컬럼 개수와 순서를 정확히 맞춰야 합니다.**
-            - (buildings 컬럼 순서: id, address, build_year, geom, data_type)
-            - (예: "녹번역 250m 영역을 그리고 그 바깥 건물")
-            - (답변 예): `SELECT *, 'building' AS data_type FROM buildings WHERE NOT ST_DWithin(geom::geography, (SELECT geom FROM subway_stations WHERE station_name = '녹번역')::geography, 250) UNION ALL SELECT id, station_name AS address, NULL::integer AS build_year, ST_Buffer((SELECT geom FROM subway_stations WHERE station_name = '녹번역')::geography, 250)::geometry AS geom, 'search_area' AS data_type FROM subway_stations WHERE station_name = '녹번역'`
+            
+            # --- [수정] 새 테이블(restaurants) 예시 추가 ---
+            - (일반 건물 조회): `SELECT *, 'building' as data_type FROM buildings...`
+            - (지하철역 조회): `SELECT *, 'station' as data_type FROM subway_stations...`
+            - (음식점 조회): "맛집", "음식점", "한식", "중식", "분식" 등은 `restaurants` 테이블을 사용합니다.
+            - (음식점 필터링): `WHERE "업태구분명" = '한식'` 또는 `WHERE "업태구분명" = '중식'` 또는 `WHERE "업태구분명" = '분식'` 또는 `WHERE "업태구분명" = '일반음식점'`을 사용하세요.
+            - "카페"는 이 데이터에 없다고 `GENERAL_ANSWER`로 응답하세요.
+            - "맛집" 또는 "음식점"이라고만 하면 `WHERE "영업상태명" = '영업/정상'`만 적용하고 "업태구분명"은 필터링하지 마세요.
+            - (예: "녹번역 300m 이내 한식 맛집"): `SELECT T1.*, 'restaurant' AS data_type FROM restaurants AS T1 JOIN subway_stations AS T2 ON ST_DWithin(T1.geom::geography, T2.geom::geography, 300) WHERE T2."kor_sta_nm" = '녹번' AND T1."업태구분명" = '한식' AND T1."영업상태명" = '영업/정상'`
+            - (예: "녹번역 근처 음식점"): `SELECT T1.*, 'restaurant' AS data_type FROM restaurants AS T1 JOIN subway_stations AS T2 ON ST_DWithin(T1.geom::geography, T2.geom::geography, 500) WHERE T2."kor_sta_nm" = '녹번' AND T1."영업상태명" = '영업/정상'`
+            - (단계구분도): "10년 단위로" 같은 요청 시, `data_type` 컬럼에 'building'이 아닌 **분류 값**을 넣어야 합니다.
+            - (복합 쿼리): "A를 그리고 B를 찾아줘" 같은 요청 시, `UNION ALL`을 사용해 두 쿼리를 합쳐야 합니다. **(컬럼 개수와 순서를 정확히 맞춰야 합니다!)**
+            - (복합 쿼리 예): `SELECT *, 'building' AS data_type FROM buildings WHERE NOT ST_DWithin(...) UNION ALL SELECT NULL::integer AS gid, NULL AS "BJDONG_NM", 'search_area' AS "BLD_NM", ... (컬럼 개수 맞추기) ... , ST_Buffer(...) AS geom, 'search_area' AS data_type FROM subway_stations ...`
+            # --- [수정 끝] ---
+            
             - 응답 형식: {{"type": "SPATIAL_QUERY", "content": "SELECT ..."}}
 
         2.  **클라이언트 제어 명령 (CLIENT_COMMAND)**:
             - "지도 확대/축소", "이동", "지도 스타일 변경", "3D 뷰" 등 **지도 자체를 조작**하는 명령.
-            - `content` 필드에 표준화된 명령어를 반환합니다.
-
             - (지도 조작): `ZOOM_IN`, `ZOOM_OUT`, `PAN_TO_BASE`
             - (지도 이동): `PAN_EAST`, `PAN_WEST`, `PAN_NORTH`, `PAN_SOUTH`
-            
-            # --- [수정] "3D 뷰" 유의어 추가 ---
             - (시점 변경): `SET_PITCH_3D`, `SET_PITCH_2D`
-            - (예: "3D로", "3D 뷰로", "버드뷰", "항공뷰", "비스듬히", "기울여줘" -> {{"type": "CLIENT_COMMAND", "content": "SET_PITCH_3D"}})
-            - (예: "2D로", "평면으로", "정면으로" -> {{"type": "CLIENT_COMMAND", "content": "SET_PITCH_2D"}})
-
-            - (지도 스타일): `SET_STYLE_STREETS`, `SET_STYLE_DARK`, `SET_STYLE_SATELLITE`, `SET_STYLE_HYBRID`, `SET_STYLE_TOPO`, `SET_STYLE_BASIC`
-            - (예: "기본 지도로", "streets" -> {{"type": "CLIENT_COMMAND", "content": "SET_STYLE_STREETS"}})
-            - (예: "다크 모드", "야간 지도로", "어둡게" -> {{"type": "CLIENT_COMMAND", "content": "SET_STYLE_DARK"}})
-            - (예: "위성 지도로", "영상 지도로" -> {{"type": "CLIENT_COMMAND", "content": "SET_STYLE_SATELLITE"}})
-            # --- [수정 끝] ---
-
+            - (지도 스타일): `SET_STYLE_STREETS`, `SET_STYLE_DARK`, `SET_STYLE_SATELLITE`
             - 응답 형식: {{"type": "CLIENT_COMMAND", "content": "ZOOM_OUT"}}
 
         3.  **일반/메타데이터 질문 (GENERAL_ANSWER)**:
             - "네가 가진 데이터 목록 보여줘", "PostGIS가 뭐야?" 등.
             - SQL을 생성하면 안 됩니다.
-            - 사용자의 질문에 대한 친절한 텍스트 답변을 생성합니다.
             - 응답 형식: {{"type": "GENERAL_ANSWER", "content": "제가 가진 데이터는..."}}
 
         4.  오직 JSON 객체 하나만 응답해야 합니다. (설명, 마크다운 ```json ... ``` 금지)
