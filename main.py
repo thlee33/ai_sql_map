@@ -139,9 +139,11 @@ def get_llm_response(user_question: str):
             # --- [NEW] 끝 ---
 
             # --- [NEW] UNION ALL (복합 쿼리) 강력 규칙 ---
+            - [!!절대 규칙!!] `UNION ALL`을 사용할 때, 각 `SELECT` 문 안에 **절대로 `LIMIT` 나 `ORDER BY`를 포함하면 안 됩니다.** (예: `... LIMIT 5 UNION ALL ...` -> **생성 금지**)
             - [매우 중요!] `UNION ALL`을 사용할 때, 절대로 `SELECT *`를 사용하면 안 됩니다.
-            - `UNION ALL`의 첫 번째 (`SELECT... FROM buildings...`)와 두 번째 (`SELECT NULL... AS col1, NULL...`) 쿼리는 **반드시** 동일한 수의 컬럼과 **순서**를 가져야 합니다.
-            - `buildings` 테이블의 모든 컬럼을 명시적으로 나열해야 합니다.
+            - `UNION ALL`의 첫 번째와 두 번째 쿼리는 **반드시** 동일한 수의 컬럼, **동일한 순서**, **동일한 데이터 타입**을 가져야 합니다.
+            - (예: `SELECT "fid", "address", "build_year", ...` -> `UNION ALL` -> `SELECT NULL::integer AS "fid", NULL::text AS "address", NULL::text AS "build_year", ...`)
+            - 쿼리를 생성할 때 `address`를 `adress`로 잘못 쓰는 등, 스키마에 없는 오타를 만들지 마십시오.
             # --- [NEW] 끝 ---
 
             - (복합 쿼리): "A를 그리고 B를 찾아줘" 같은 요청 시...
