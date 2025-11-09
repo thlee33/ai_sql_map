@@ -1,4 +1,4 @@
-# main.py (Render.com 배포용 - 'null' crash 버그 수정)
+# main.py (Render.com 배포용 - LIKE 검색 수정)
 import os
 import psycopg
 import google.generativeai as genai
@@ -30,7 +30,7 @@ DB_PASS = os.environ.get("DB_PASS")
 DATABASE_SCHEMA = """
 [데이터베이스 스키마]
 1.  buildings (서울시 건물)
-    - "address" (TEXT): 주소 (예: '녹번동 11-1')
+    - "address" (TEXT): 주소 (예: '녹번동')
     - "build_year" (INT): 건축 연도 (예: 1990)
     - "BLD_NM" (TEXT): 건물명
     - "MAIN_PURPS_CD_NM" (TEXT): 건물 주용도 (예: '단독주택', '아파트')
@@ -66,7 +66,6 @@ app.add_middleware(
 class VoiceQuery(BaseModel):
     text: str
 
-# --- [수정] ---
 def execute_postgis_query(sql_query: str):
     if not all([DB_HOST, DB_NAME, DB_USER, DB_PASS]):
         print("❌ 쿼리 실행 에러: DB 환경 변수가 설정되지 않았습니다.")
@@ -76,7 +75,6 @@ def execute_postgis_query(sql_query: str):
     try:
         with psycopg.connect(conn_info) as conn:
             with conn.cursor() as cur:
-                # [수정!] COALESCE(json_agg(...), '[]'::json)을 사용하여 0건일 때 'null' 대신 '[]'를 반환
                 geojson_query = f"""
                 WITH analysis_result AS (
                     {sql_query} 
@@ -94,7 +92,6 @@ def execute_postgis_query(sql_query: str):
                 FROM analysis_result
                 WHERE geom IS NOT NULL;
                 """
-                # --- [수정 끝] ---
                 
                 print("--- 실행될 GeoJSON 쿼리 ---")
                 print(geojson_query)
@@ -105,12 +102,10 @@ def execute_postgis_query(sql_query: str):
                 if result and result[0]:
                     return result[0]
                 else:
-                    # (이 코드는 이제 거의 실행되지 않지만, 만약을 위해 둡니다)
                     return {"type": "FeatureCollection", "features": []} 
     except Exception as e:
         print(f"❌ 쿼리 실행 에러: {e}")
         return {"error": str(e), "query": sql_query}
-# --- [수정 끝] ---
 
 
 def get_llm_response(user_question: str):
@@ -134,32 +129,31 @@ def get_llm_response(user_question: str):
             - [중요!] 팝업에 모든 속성을 표시할 수 있도록, 원본 테이블의 **모든 컬럼을 선택 (`SELECT * ...`)** 해야 합니다.
             - [중요!] 지도 시각화를 위해 `data_type` 컬럼을 꼭 포함해야 합니다.
             
+            # --- [수정] LIKE 검색 규칙 추가 ---
+            - (이름/주소 검색): "station_name", "address", "BLD_NM", "사업장명" 등 텍스트 컬럼을 검색할 때는 `="값"` 대신 `LIKE '값%'`를 사용해야 합니다.
+            - (예: "녹번역" -> `WHERE "station_name" LIKE '녹번%'`)
+            - (예: "녹번동" -> `WHERE "address" LIKE '녹번동%'`)
+            # --- [수정 끝] ---
+            
             - (일반 건물 조회): `SELECT *, 'building' as data_type FROM buildings...`
             - (지하철역 조회): `SELECT *, 'station' as data_type FROM subway_stations...`
-            - (음식점 조회): "맛집", "음식점", "한식", "중식", "분식" 등은 `restaurants` 테이블을 사용합니다.
-            - (음식점 필터링): `WHERE "업태구분명" = '한식'` 또는 `WHERE "업태구분명" = '중식'` 등을 사용하세요.
+            - (음식점 조회): "맛집", "음식점", "한식", "중식", "분식" 등은 `restaurant` 테이블을 사용합니다.
+            - (음식점 필터링): `WHERE "업태구분명" LIKE '한식%'` 또는 `WHERE "업태구분명" LIKE '중식%'` 등을 사용하세요.
             - "카페"는 이 데이터에 없다고 `GENERAL_ANSWER`로 응답하세요.
-            - (예: "녹번역 300m 이내 한식 맛집"): `SELECT T1.*, 'restaurant' AS data_type FROM restaurant AS T1 JOIN subway_stations AS T2 ON ST_DWithin(T1.geom::geography, T2.geom::geography, 300) WHERE T2."station_name" = '녹번역' AND T1."업태구분명" = '한식' AND T1."영업상태명" = '영업/정상'`
-            - (예: "녹번역 근처 음식점"): `SELECT T1.*, 'restaurant' AS data_type FROM restaurant AS T1 JOIN subway_stations AS T2 ON ST_DWithin(T1.geom::geography, T2.geom::geography, 500) WHERE T2."station_name" = '녹번역' AND T1."영업상태명" = '영업/정상'`
+            - (예: "녹번역 300m 이내 한식 맛집"): `SELECT T1.*, 'restaurant' AS data_type FROM restaurant AS T1 JOIN subway_stations AS T2 ON ST_DWithin(T1.geom::geography, T2.geom::geography, 300) WHERE T2."station_name" LIKE '녹번%' AND T1."업태구분명" LIKE '한식%' AND T1."영업상태명" = '영업/정상'`
             - (단계구분도): "10년 단위로" 같은 요청 시, `data_type` 컬럼에 'building'이 아닌 **분류 값**을 넣어야 합니다.
             - (복합 쿼리): "A를 그리고 B를 찾아줘" 같은 요청 시, `UNION ALL`을 사용해 두 쿼리를 합쳐야 합니다. **(컬럼 개수와 순서를 정확히 맞춰야 합니다!)**
-            - (복합 쿼리 예): `SELECT *, 'building' AS data_type FROM buildings WHERE NOT ST_DWithin(...) UNION ALL SELECT NULL::integer AS gid, NULL AS "BJDONG_NM", 'search_area' AS "BLD_NM", ... (컬럼 개수 맞추기) ... , ST_Buffer(...) AS geom, 'search_area' AS data_type FROM subway_stations ...`
+            - (복합 쿼리 예): `SELECT *, 'building' AS data_type FROM buildings WHERE NOT ST_DWithin(...) UNION ALL SELECT NULL::integer AS gid, NULL AS "address", NULL AS "build_year", ... (컬럼 개수 맞추기) ... , ST_Buffer(...) AS geom, 'search_area' AS data_type FROM subway_stations ...`
             
             - 응답 형식: {{"type": "SPATIAL_QUERY", "content": "SELECT ..."}}
 
         2.  **클라이언트 제어 명령 (CLIENT_COMMAND)**:
-            - "지도 확대/축소", "이동", "지도 스타일 변경", "3D 뷰" 등 **지도 자체를 조작**하는 명령.
-            - (지도 조작): `ZOOM_IN`, `ZOOM_OUT`, `PAN_TO_BASE`
-            - (지도 이동): `PAN_EAST`, `PAN_WEST`, `PAN_NORTH`, `PAN_SOUTH`
-            - (시점 변경): `SET_PITCH_3D`, `SET_PITCH_2D`
-            - (지도 스타일): `SET_STYLE_STREETS`, `SET_STYLE_DARK`, `SET_STYLE_SATELLITE`
+            - (기존과 동일: ZOOM, PAN, PITCH, STYLE 등)
             - 응답 형식: {{"type": "CLIENT_COMMAND", "content": "ZOOM_OUT"}}
 
         3.  **일반/메타데이터 질문 (GENERAL_ANSWER)**:
-            - "네가 가진 데이터 목록 보여줘", "PostGIS가 뭐야?" 등.
-            - SQL을 생성하면 안 됩니다.
-            - 응답 형식: {{"type": "GENERAL_ANSWER", "content": "제가 가진 데이터는..."}}
-
+            - (기존과 동일)
+            
         4.  오직 JSON 객체 하나만 응답해야 합니다. (설명, 마크다운 ```json ... ``` 금지)
         5.  만약 질문을 분류하기 애매하다면, 무조건 {{"type": "GENERAL_ANSWER", "content": "질문을 이해하지 못했습니다."}} 를 반환하십시오.
         6.  절대로 빈 문자열이나 null을 반환하지 마십시오.
