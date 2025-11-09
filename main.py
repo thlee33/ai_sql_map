@@ -128,18 +128,24 @@ def get_llm_response(user_question: str):
         1.  **공간 분석/지도 표시 질문 (SPATIAL_QUERY)**:
             - "건물 찾아줘", "녹번역 주변", "500미터 이내", "맛집" 등 지도에 표시해야 하는 질문.
             - 반드시 PostGIS SQL 쿼리를 생성해야 합니다.
-            - [중요!] 팝업에 모든 속성을 표시할 수 있도록, 원본 테이블의 **모든 컬럼을 선택 (`SELECT * ...`)** 해야 합니다.
-            - [중요!] 지도 시각화를 위해 `data_type` 컬럼을 꼭 포함해야 합니다.
             
             # --- [수정] LIKE 검색 규칙 추가 ---
-            - (이름/주소 검색): "station_name", "address", "BLD_NM", "사업장명" 등 텍스트 컬럼을 검색할 때는 `="값"` 대신 `LIKE '값%'`를 사용해야 합니다.
+            - (이름/주소 검색): "station_name", "name" 등 텍스트 컬럼을 검색할 때는 `="값"` 으로 결과가 없으면, `LIKE '값%'`으로 다시 검색합니다.
             - (예: "녹번역" -> `WHERE "station_name" LIKE '녹번%'`)
-            - (예: "녹번동" -> `WHERE "address" LIKE '녹번동%'`)
             # --- [수정 끝] ---
 
             # --- [NEW] 연도 검색 규칙 추가 ---
             - (연도 검색): "build_year" 컬럼은 TEXT 타입입니다. "30년 이상" 또는 "1990년 이후" 등 숫자 비교 시, 연도에 해당하는 맨 앞의 4자리 숫자를 가져와서 `CAST("build_year" AS INTEGER) <= 1994` 또는 `CAST("build_year" AS INTEGER) >= 1990` 처럼 반드시 `CAST`를 사용해 정수(INTEGER)로 변환해야 합니다.
             # --- [NEW] 끝 ---
+
+            # --- [NEW] UNION ALL (복합 쿼리) 강력 규칙 ---
+            - [매우 중요!] `UNION ALL`을 사용할 때, 절대로 `SELECT *`를 사용하면 안 됩니다.
+            - `UNION ALL`의 첫 번째 (`SELECT... FROM buildings...`)와 두 번째 (`SELECT NULL... AS col1, NULL...`) 쿼리는 **반드시** 동일한 수의 컬럼과 **순서**를 가져야 합니다.
+            - `buildings` 테이블의 모든 컬럼을 명시적으로 나열해야 합니다.
+            # --- [NEW] 끝 ---
+
+            - (복합 쿼리): "A를 그리고 B를 찾아줘" 같은 요청 시...
+            - (복합 쿼리 예): `SELECT "fid", "adress", "build_year", "name", geom FROM buildings ... UNION ALL SELECT NULL::integer AS "fid", NULL AS "adress", NULL AS "build_year", NULL AS "name", ST_Buffer(...) AS geom, 'search_area' AS data_type FROM subway_stations ...`
 
             - (일반 건물 조회): `SELECT *, 'building' as data_type FROM buildings...`
             - (지하철역 조회): `SELECT *, 'station' as data_type FROM subway_stations...`
