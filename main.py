@@ -138,6 +138,20 @@ def get_llm_response(user_question: str):
             - (연도 검색): "build_year" 컬럼은 TEXT 타입입니다. "30년 이상" 또는 "1990년 이후" 등 숫자 비교 시, 연도에 해당하는 맨 앞의 4자리 숫자를 가져와서 `CAST("build_year" AS INTEGER) <= 1994` 또는 `CAST("build_year" AS INTEGER) >= 1990` 처럼 반드시 `CAST`를 사용해 정수(INTEGER)로 변환해야 합니다.
             # --- [NEW] 끝 ---
 
+            # --- [NEW] [규칙 3.5] Convex Hull (결과물 경계) 규칙 ---
+            - [매우 중요!] "건물들의 경계 영역", "결과를 둘러싸는", "Convex Hull" (컨벡스 홀)을 그려달라고 요청하면, **`ST_Buffer` (반경)을 사용하면 안 됩니다.**
+            - 이 경우, `ST_ConvexHull(ST_Collect(geom))` 함수를 사용해 찾은 결과물(예: 건물)들의 외곽 경계(Polygon) 1개만 반환해야 합니다. `UNION ALL`을 사용하지 마십시오.
+            - (예: "대림역 100m 이내 50년 이상된 건물의 경계 영역")
+            - (SQL 예시): 
+              `WITH found_geoms AS (
+                  SELECT T1.geom 
+                  FROM "buildings" AS T1 
+                  JOIN "subway_stations" AS T2 ON ST_DWithin(T1.geom::geography, T2.geom::geography, 100) 
+                  WHERE T2."station_name" LIKE '대림%' AND CAST(SUBSTRING(T1."build_year" FROM 1 FOR 4) AS INTEGER) <= 1975
+              )`
+              `SELECT ST_ConvexHull(ST_Collect(geom)) AS geom, 'convex_hull' AS data_type FROM found_geoms WHERE geom IS NOT NULL`
+            # --- [NEW] 끝 ---
+
             # --- [NEW] UNION ALL (복합 쿼리) 강력 규칙 ---
             - [!!최우선 규칙!!] '가장 가까운 10개' (ORDER BY ... LIMIT 10) 요청과 '영역을 그려줘' (ST_Buffer) 요청이 **동시에** 들어오면, **`UNION ALL`을 사용하지 말고 '가장 가까운 10개' 쿼리만 반환하십시오.**
             - (예: "대림역 100m 반경과 가장 가까운 10개" -> `LIMIT 10` 쿼리만 생성. 버퍼(ST_Buffer)는 무시.)
