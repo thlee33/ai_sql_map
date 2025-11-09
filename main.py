@@ -159,7 +159,10 @@ def get_llm_response(user_question: str):
             - [매우 중요!] `UNION ALL`을 사용할 때, 절대로 `SELECT *`를 사용하면 안 됩니다.
             - `UNION ALL`의 첫 번째와 두 번째 쿼리는 **반드시** 동일한 수의 컬럼, **동일한 순서**, **동일한 데이터 타입**을 가져야 합니다.
             - (예: `SELECT "fid", "address", "build_year", ...` -> `UNION ALL` -> `SELECT NULL::integer AS "fid", NULL::text AS "address", NULL::text AS "build_year", ...`)
-            - 쿼리를 생성할 때 `address`를 `adress`로 잘못 쓰는 등, 스키마에 없는 오타를 만들지 마십시오.
+            - [!!절대 규칙!!] `LIMIT` / `ORDER BY`가 없는 일반적인 "A 이내의 B를 찾아줘" 요청 시, `UNION ALL`을 사용해 (1)결과물(B)과 (2)검색 반경(A)을 함께 반환할 수 있습니다.
+            - **(주의!)** 이는 [규칙 3.5]의 `Convex Hull` 요청과는 다릅니다. 이 쿼리는 **검색 기준점(예: 지하철역)의 반경**을 그립니다.
+            - (정확한 예시): 
+            `SELECT "fid", "address", "build_year", "name", "A9", geom, 'building' AS data_type FROM "buildings" ...`
             # --- [NEW] 끝 ---
 
             - (복합 쿼리): "A를 그리고 B를 찾아줘" 같은 요청 시...
