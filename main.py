@@ -41,9 +41,10 @@ DATABASE_SCHEMA = """
     - geom (GEOMETRY(Point, 4326)): 위치 (EPSG:4326)
 
 3.  restaurant (서울시 음식점)
-    - "사업장명" (TEXT): 가게 이름 (예: '부어치킨')
-    - "업태구분명" (TEXT): 업종 (예: '한식', '중식', '분식', '일반음식점')
-    - "소재지전체주소" (TEXT): 주소
+    - "name" (TEXT): 가게 이름 (예: '부어치킨')
+    - "type" (TEXT): 업종 (예: '한식', '중식', '분식', '일반음식점')
+    - "address" (TEXT): 주소
+    - "tel" (TEXT): 전화
     - geom (GEOMETRY(Point, 4326)): 위치 (EPSG:4326)
 
 [PostGIS 주요 함수]
