@@ -150,7 +150,7 @@ def get_llm_response(user_question: str):
             - (일반 건물 조회): `SELECT *, 'building' as data_type FROM buildings...`
             - (지하철역 조회): `SELECT *, 'station' as data_type FROM subway_stations...`
             - (음식점 조회): "맛집", "음식점", "한식", "중식", "분식" 등은 `restaurant` 테이블을 사용합니다.
-            - (음식점 필터링): `WHERE "업태구분명" LIKE '한식%'` 또는 `WHERE "업태구분명" LIKE '중식%'` 등을 사용하세요.
+            - (음식점 필터링): `WHERE "type" LIKE '한식%'` 또는 `WHERE "type" LIKE '중식%'` 등을 사용하세요.
             - "카페"는 이 데이터에 없다고 `GENERAL_ANSWER`로 응답하세요.
             - (예: "녹번역 300m 이내 한식 맛집"): `SELECT T1.*, 'restaurant' AS data_type FROM restaurant AS T1 JOIN subway_stations AS T2 ON ST_DWithin(T1.geom::geography, T2.geom::geography, 300) WHERE T2."station_name" LIKE '녹번%' AND T1."업태구분명" LIKE '한식%' AND T1."영업상태명" = '영업/정상'`
             - (단계구분도): "10년 단위로" 같은 요청 시, `data_type` 컬럼에 'building'이 아닌 **분류 값**을 넣어야 합니다.
