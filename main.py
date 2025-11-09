@@ -31,10 +31,10 @@ DATABASE_SCHEMA = """
 [데이터베이스 스키마]
 1.  buildings (서울시 건물)
     - "fid" (INT): 고유 ID 
-    - "adress" (TEXT): 주소 (예: '녹번동')
+    - "address" (TEXT): 주소 (예: '녹번동')
     - "build_year" (TEXT): 건축 연도 (예: '2022-01-19')
     - "name" (TEXT): 건물명
-    - "A9" (TEXT): 건물 주용도 (예: '단독주택', '공동주택')
+    - "type" (TEXT): 건물 주용도 (예: '단독주택', '공동주택')
     - geom (GEOMETRY(Point, 4326)): 위치 (EPSG:4326)
 
 2.  subway_stations (서울시 지하철역)
@@ -139,6 +139,8 @@ def get_llm_response(user_question: str):
             # --- [NEW] 끝 ---
 
             # --- [NEW] UNION ALL (복합 쿼리) 강력 규칙 ---
+            - [!!최우선 규칙!!] '가장 가까운 10개' (ORDER BY ... LIMIT 10) 요청과 '영역을 그려줘' (ST_Buffer) 요청이 **동시에** 들어오면, **`UNION ALL`을 사용하지 말고 '가장 가까운 10개' 쿼리만 반환하십시오.**
+            - (예: "대림역 100m 반경과 가장 가까운 10개" -> `LIMIT 10` 쿼리만 생성. 버퍼(ST_Buffer)는 무시.)
             - [!!절대 규칙!!] `UNION ALL`을 사용할 때, 각 `SELECT` 문 안에 **절대로 `LIMIT` 나 `ORDER BY`를 포함하면 안 됩니다.** (예: `... LIMIT 5 UNION ALL ...` -> **생성 금지**)
             - [매우 중요!] `UNION ALL`을 사용할 때, 절대로 `SELECT *`를 사용하면 안 됩니다.
             - `UNION ALL`의 첫 번째와 두 번째 쿼리는 **반드시** 동일한 수의 컬럼, **동일한 순서**, **동일한 데이터 타입**을 가져야 합니다.
@@ -147,7 +149,7 @@ def get_llm_response(user_question: str):
             # --- [NEW] 끝 ---
 
             - (복합 쿼리): "A를 그리고 B를 찾아줘" 같은 요청 시...
-            - (복합 쿼리 예): `SELECT "fid", "adress", "build_year", "name", geom FROM buildings ... UNION ALL SELECT NULL::integer AS "fid", NULL AS "adress", NULL AS "build_year", NULL AS "name", ST_Buffer(...) AS geom, 'search_area' AS data_type FROM subway_stations ...`
+            - (복합 쿼리 예): `SELECT "fid", "address", "build_year", "name", geom FROM buildings ... UNION ALL SELECT NULL::integer AS "fid", NULL AS "address", NULL AS "build_year", NULL AS "name", ST_Buffer(...) AS geom, 'search_area' AS data_type FROM subway_stations ...`
 
             - (일반 건물 조회): `SELECT *, 'building' as data_type FROM buildings...`
             - (지하철역 조회): `SELECT *, 'station' as data_type FROM subway_stations...`
