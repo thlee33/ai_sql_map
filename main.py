@@ -136,7 +136,11 @@ def get_llm_response(user_question: str):
             - (예: "녹번역" -> `WHERE "station_name" LIKE '녹번%'`)
             - (예: "녹번동" -> `WHERE "address" LIKE '녹번동%'`)
             # --- [수정 끝] ---
-            
+
+            # --- [NEW] 연도 검색 규칙 추가 ---
+            - (연도 검색): "build_year" 컬럼은 TEXT 타입입니다. "30년 이상" 또는 "1990년 이후" 등 숫자 비교 시, 연도에 해당하는 맨 앞의 4자리 숫자를 가져와서 `CAST("build_year" AS INTEGER) <= 1994` 또는 `CAST("build_year" AS INTEGER) >= 1990` 처럼 반드시 `CAST`를 사용해 정수(INTEGER)로 변환해야 합니다.
+            # --- [NEW] 끝 ---
+
             - (일반 건물 조회): `SELECT *, 'building' as data_type FROM buildings...`
             - (지하철역 조회): `SELECT *, 'station' as data_type FROM subway_stations...`
             - (음식점 조회): "맛집", "음식점", "한식", "중식", "분식" 등은 `restaurant` 테이블을 사용합니다.
