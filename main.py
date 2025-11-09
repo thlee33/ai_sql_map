@@ -32,7 +32,7 @@ DATABASE_SCHEMA = """
 1.  buildings (서울시 건물)
     - "fid" (INT): 고유 ID 
     - "adress" (TEXT): 주소 (예: '녹번동')
-    - "build_year" (INT): 건축 연도 (예: 1990)
+    - "build_year" (TEXT): 건축 연도 (예: '2022-01-19')
     - "name" (TEXT): 건물명
     - "A9" (TEXT): 건물 주용도 (예: '단독주택', '공동주택')
     - geom (GEOMETRY(Point, 4326)): 위치 (EPSG:4326)
