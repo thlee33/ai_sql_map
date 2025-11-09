@@ -30,10 +30,11 @@ DB_PASS = os.environ.get("DB_PASS")
 DATABASE_SCHEMA = """
 [데이터베이스 스키마]
 1.  buildings (서울시 건물)
-    - "address" (TEXT): 주소 (예: '녹번동')
+    - "fid" (INT): 고유 ID 
+    - "adress" (TEXT): 주소 (예: '녹번동')
     - "build_year" (INT): 건축 연도 (예: 1990)
-    - "BLD_NM" (TEXT): 건물명
-    - "MAIN_PURPS_CD_NM" (TEXT): 건물 주용도 (예: '단독주택', '아파트')
+    - "name" (TEXT): 건물명
+    - "A9" (TEXT): 건물 주용도 (예: '단독주택', '공동주택')
     - geom (GEOMETRY(Point, 4326)): 위치 (EPSG:4326)
 
 2.  subway_stations (서울시 지하철역)
