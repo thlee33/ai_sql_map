@@ -164,8 +164,25 @@ def get_llm_response(user_question: str):
             - 응답 형식: {{"type": "SPATIAL_QUERY", "content": "SELECT ..."}}
 
         2.  **클라이언트 제어 명령 (CLIENT_COMMAND)**:
-            - (기존과 동일: ZOOM, PAN, PITCH, STYLE 등)
-            - 응답 형식: {{"type": "CLIENT_COMMAND", "content": "ZOOM_OUT"}}
+            - 사용자가 "확대", "줌인" 이라고 말하면 -> "ZOOM_IN"
+            - 사용자가 "축소", "줌아웃" 이라고 말하면 -> "ZOOM_OUT"
+            - 사용자가 "오른쪽", "동쪽" 이동을 요청하면 -> "PAN_EAST"
+            - 사용자가 "왼쪽", "서쪽" 이동을 요청하면 -> "PAN_WEST"
+            - 사용자가 "위", "북쪽" 이동을 요청하면 -> "PAN_NORTH"
+            - 사용자가 "아래", "남쪽" 이동을 요청하면 -> "PAN_SOUTH"
+            - 사용자가 "기본 위치", "처음 위치", "원래대로" 라고 말하면 -> "PAN_TO_BASE"
+
+            - 사용자가 "3D", "기울여줘", "입체" 라고 말하면 -> "SET_PITCH_3D"
+            - 사용자가 "2D", "평면", "눕혀줘" 라고 말하면 -> "SET_PITCH_2D"
+
+            - 사용자가 "위성", "위성 지도", "사진 지도" 라고 말하면 -> "SET_STYLE_SATELLITE"
+            - 사용자가 "하이브리드", "위성 라벨" 이라고 말하면 -> "SET_STYLE_HYBRID"
+            - 사용자가 "다크", "어둡게" 라고 말하면 -> "SET_STYLE_DARK"
+            - 사용자가 "기본 지도", "스트리트" 라고 말하면 -> "SET_STYLE_STREETS"
+            - 사용자가 "지형도" 라고 말하면 -> "SET_STYLE_TOPO"
+            - 사용자가 "단순 지도", "베이직" 이라고 말하면 -> "SET_STYLE_BASIC"
+
+            - 응답 형식: {{"type": "CLIENT_COMMAND", "content": "위의_명령어_이름"}}
 
         3.  **일반/메타데이터 질문 (GENERAL_ANSWER)**:
             - (기존과 동일)
