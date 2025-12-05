@@ -53,6 +53,43 @@ LLM(Large Language Model)을 단순한 챗봇이 아닌, **사용자의 의도(I
 AI(Gemini)는 실행자가 아닙니다. 명령을 해석하고 분기하는 '두뇌' 역할을 수행합니다.  
   
 
+## 🏗️ 시스템 시퀀스 다이어그램 (System Flow)
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor User as 👤 사용자 (Web)
+    participant Server as ⚡ Backend (FastAPI)
+    participant AI as 🤖 AI (Gemini)
+    participant DB as 🗄️ DB (PostGIS)
+    
+    Note over User, Server: 1. 사용자 요청 발생
+    User->>Server: "녹번역 500m 이내 맛집 찾아줘" (POST /analyze)
+    
+    Note over Server, AI: 2. 의도 파악 및 SQL 생성
+    Server->>AI: 시스템 프롬프트 + DB 스키마 + 질문 전송
+    activate AI
+    AI-->>Server: JSON 반환 { type: "SPATIAL_QUERY", content: "SELECT..." }
+    deactivate AI
+    
+    alt 공간 분석 (SPATIAL_QUERY)
+        Server->>DB: 생성된 SQL 쿼리 실행 (ST_DWithin...)
+        activate DB
+        DB-->>Server: 검색 결과 반환 (GeoJSON)
+        deactivate DB
+        Server-->>User: GeoJSON 데이터 응답
+        User->>User: 지도에 마커/영역 표시 (updateMap)
+        
+    else 지도 제어 (CLIENT_COMMAND)
+        Server-->>User: 제어 명령 응답 { type: "CLIENT_COMMAND", content: "ZOOM_OUT" }
+        User->>User: 지도 API 실행 (map.zoomOut)
+        
+    else 일반 질의 (GENERAL_ANSWER)
+        Server-->>User: 텍스트 응답 { answer_text: "..." }
+        User->>User: 채팅창에 텍스트 표시
+    end
+```
+
 
   
 
