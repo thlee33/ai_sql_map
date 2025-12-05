@@ -15,7 +15,8 @@ LLM(Large Language Model)을 단순한 챗봇이 아닌, **사용자의 의도(I
 - 비용 효율성: 오픈소스(FOSS4G) 스택과 클라우드 무료 티어(Render, GitHub Pages)를 활용하여 구축되었습니다.
 
 
-✨ 주요 기능 (Key Features)
+✨ 주요 기능 (Key Features)  
+
 이 시스템은 AI가 사용자의 자연어 명령을 분석하여 다음 3가지 유형으로 자동 분류하고 실행합니다.
 
    🔬 공간 분석 (Spatial Analysis)     
